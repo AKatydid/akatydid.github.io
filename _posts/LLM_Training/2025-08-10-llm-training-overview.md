@@ -94,7 +94,7 @@ the cost ofthe 3 apples is $9. 9/3 = 3, so eachapple costs $3. The answer is $3"
 ## Post-training: RL
 > 用课本类比，base_model 是课本上的知识描述；SFT 是示例题目，包含了人类专家固定的步骤和答案，LLMs 只能尽可能地拟合，做出最佳猜测；而 RL 则是课后习题，给定了问题描述（Prompt）和最终答案，目的是训练 LLMs 吐出中间步骤的过程，并内化到 LLMs 中，如。
 
-![Desktop View](/assets/img/blog/LLM_Training/llm-rl-overview.png){: .center-img width="50%" height="589" }
+![Desktop View](/assets/img/blog/LLM_Training/llm-rl-overview.png){: width="400" height="400"}
 <center style="">Fig 3. RL 训练。给定问题描述和最终答案（黄色部分），LLMs 探索补全 Solution（白色部分）。</center>
 
 RL 作用有两个：（1）增加 Working Memory，以更符合 LLMs 的 token sequence 得到正确的答案；（2）与人类偏好对齐。
