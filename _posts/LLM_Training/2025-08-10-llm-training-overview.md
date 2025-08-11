@@ -22,12 +22,12 @@ LLMs 无法直接理解自然语言的文本，而分词器 (Tokenizer) 则是�
 
 <b>Step 3: training.</b> 
 根据互联网语料，最大化 next token 的概率，如 Fig 1 所示。
-![Desktop View](/assets/img/blog/LLM_Training/pre-train.png){: width="972" height="589" }
+![Desktop View](/assets/img/blog/LLM_Training/pre-train.png){: width="600" height="400" }
 <center>Fig 1. Training</center>
 
 <b>Inference.</b> 
 基于 Pre-training 后的基础模型，输入 Token 序列，基础模型预测 next token。
-![Desktop View](/assets/img/blog/LLM_Training/inference.png){: width="972" height="589" }
+![Desktop View](/assets/img/blog/LLM_Training/inference.png){: width="550" height="400" }
 <center>Fig 2. Inference</center>
 
 ## 2.Post-training: SFT
@@ -92,7 +92,7 @@ the cost ofthe 3 apples is $9. 9/3 = 3, so eachapple costs $3. The answer is $3"
 由于 token 基元的因素，LLMs 不擅长诸如计数，拼写，数值计算等问题，通常考虑硬编码或者调用工具两种解决方案。
 
 ## Post-training: RL
-> 用课本类比，base_model 是课本上的知识描述；SFT 是示例题目，包含了人类专家固定的步骤和答案，LLMs 只能尽可能地拟合，做出最佳猜测；而 RL 则是课后习题，给定了问题描述（Prompt）和最终答案，目的是训练 LLMs 吐出中间步骤的过程，并内化到 LLMs 中，如。
+> 用课本类比，base_model 是课本上的知识描述；SFT 是示例题目，包含了人类专家固定的步骤和答案，LLMs 只能尽可能地拟合，做出最佳猜测；而 RL 则是课后习题，给定了问题描述（Prompt）和最终答案，目的是训练 LLMs 吐出中间步骤的过程，并内化到 LLMs 中，如 Fig 3 所示。
 
 ![Desktop View](/assets/img/blog/LLM_Training/llm-rl-overview.png){: width="400" height="400"}
 <center style="">Fig 3. RL 训练。给定问题描述和最终答案（黄色部分），LLMs 探索补全 Solution（白色部分）。</center>
@@ -125,8 +125,8 @@ Answer:$3
 ```
 
 **人类偏好对齐。**
-RL 的反馈来源于 reward，而人工对 LLMs 生成的每条序列进行打分是不现实的，RLHF 则是通过少量数据训练神经网络（cost model），以模拟人类评分。 
-Cost Model 的输入是 LLMs 生成的序列，输出一个 reward 数值标量。需要注意的是，Cost Model 是一个有损的人类偏好模拟器，过长的训练可能会误导 LLMs，比如最后输出 "the the the ..." 的序列，需要在适当时候停止。
+RL 的反馈来源于 reward，而人工对 LLMs 生成的每条序列进行打分是不现实的，RLHF 则是通过少量数据训练神经网络（Cost Model），以模拟人类评分。 
+Cost Model 的输入是 LLMs 生成的序列，输出一个 reward 数值标量。需要注意的是，Cost Model 是一个有损的人类偏好模拟器，过长的 RLHF 训练可能会误导 LLMs，比如最后输出 "the the the ..." 的序列，需要在适当时候停止。
 **实际上，RLHF 并非传统意义上的 RL，更像一次微调。**
 
 
