@@ -107,32 +107,34 @@ dim3 block = dim3(BN / TN, BM / TM);
 dim3 grid = dim3((N + BN - 1) / BN, (M + BM - 1) / BM);
 */
 template<const int BM, const int BN, const int BK, const int TM, const int TN>
-__global__ void sgemmKernelV2(float* __restrict__ a, float* __restrict__ b, float* __restrict__ c,
-    const int M, const int N, const int K, const float alpha, const float beta
+__global__ void sgemmKernelV2(
+    float* A, float* B, float* C, 
+    const int M, const int N, const int K, 
+    const float alpha, const float beta
 ){
     int tid = threadIdx.y * blockDim.x + threadIdx.x;
 
-    int load_a_smem_m = tid / (BK / 4);           // tid / 2
-    int load_a_smem_k = (tid % (BK / 4)) * 4;     // (tid % 2 == 0) ? 0 : 4
-    int load_b_smem_k = tid >> 5;           // tid / 32
-    int load_b_smem_n = (tid & 31) << 2;    // (tid % 32) * 4
+    __shared__ float sa[BM][BK];
+    __shared__ float sb[BK][BN];
+    
+    int load_a_smem_m = tid / (BK / 4);
+    int load_a_smem_k = (tid % (BK / 4)) * 4;
+    int load_b_smem_k = tid / (BN / 4);
+    int load_b_smem_n = (tid % (BN / 4)) * 4;
 
     int load_a_gmem_m = blockIdx.y * BM + load_a_smem_m;
     int load_b_gmem_n = blockIdx.x * BN + load_b_smem_n;
 
     float tileSum[TM][TN] = {0.0};
-    __shared__ float sa[BM][BK];
-    __shared__ float sb[BK][BN];
-
     int nIter = (K + BK - 1) / BK;
     for (int bk = 0; bk < nIter; ++bk){
         int load_a_gmem_k = bk * BK + load_a_smem_k;
-        FLOAT4(sa[load_a_smem_m][load_a_smem_k]) = FLOAT4(a[OFFSET(load_a_gmem_m, load_a_gmem_k, K)]);
+        FLOAT4(sa[load_a_smem_m][load_a_smem_k]) = FLOAT4(A[OFFSET(load_a_gmem_m, load_a_gmem_k, K)]);
         int load_b_gmem_k = bk * BK + load_b_smem_k;
-        FLOAT4(sb[load_b_smem_k][load_b_smem_n]) = FLOAT4(b[OFFSET(load_b_gmem_k, load_b_gmem_n, N)]);
+        FLOAT4(sb[load_b_smem_k][load_b_smem_n]) = FLOAT4(B[OFFSET(load_b_gmem_k, load_b_gmem_n, N)]);
 
         __syncthreads();
-
+        
         #pragma unroll
         for (int k = 0; k < BK; ++k){
             #pragma unroll
@@ -147,15 +149,15 @@ __global__ void sgemmKernelV2(float* __restrict__ a, float* __restrict__ b, floa
         __syncthreads();
     }
 
-    // write back to global mem
+    // write back to gmem
     #pragma unroll
-    for (int i = 0; i < TM; i++) {
+    for (int i = 0; i < TM; ++i){
         int store_c_gmem_m = blockIdx.y * BM + threadIdx.y * TM + i;
         #pragma unroll
-        for (int j = 0; j < TN; j += 4) {
+        for (int j = 0; j < TN; j+=4){
             int store_c_gmem_n = blockIdx.x * BN + threadIdx.x * TN + j;
             int store_c_gmem_addr = OFFSET(store_c_gmem_m, store_c_gmem_n, N);
-            FLOAT4(c[store_c_gmem_addr]) = FLOAT4(tileSum[i][j]);
+            FLOAT4(C[store_c_gmem_addr]) = FLOAT4(tileSum[i][j]);
         }
     }
 }
