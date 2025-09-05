@@ -11,7 +11,7 @@ mermaid: true
 
 通用矩阵乘（GEMM）计算公式为 $C=\alpha AB + \beta C$，为简便计算，下面的 $\alpha$ 和 $\beta$ 分别设置为 1 和 0。
 
-完整代码请参考个人仓库：[OpenKernel]()
+完整代码请参考个人仓库：[OpenKernel](https://github.com/AKatydid/OpenKernels.git)
 
 ## CPU SGEMM
 通过 3 层 for 循环实现 CPU 上的 SGEMM， 计算次数 $m \times n \times k$。
