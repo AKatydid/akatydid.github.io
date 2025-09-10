@@ -1,6 +1,6 @@
 ---
 layout: post
-title: CUDA SGEMM
+title: CUDA-Operators-1-SGEMM
 date: 2025-09-01 07:43 +0000
 categories: [CUDA]
 tags: [CUDA, basic]
@@ -9,44 +9,30 @@ math: true
 mermaid: true
 ---
 
-通用矩阵乘（GEMM）计算公式为 $C=\alpha AB + \beta C$，为简便计算，下面的 $\alpha$ 和 $\beta$ 分别设置为 1 和 0。
+本文重点阐述了各类算子的逐步优化过程，涵盖 CUDA 常用算子的实现方法，并对不同算子在实现中的性能瓶颈进行分析。各类算子完整代码请参考个人仓库 [OpenKernels](https://github.com/AKatydid/OpenKernels.git)。
 
-完整代码请参考个人仓库：[OpenKernel](https://github.com/AKatydid/OpenKernels.git)
+## SGEMM
 
-## CPU SGEMM
-通过 3 层 for 循环实现 CPU 上的 SGEMM， 计算次数 $m \times n \times k$。
+通用矩阵乘（GEMM）计算公式为：$C=\alpha AB + \beta C$，核心部分是矩阵 A 和 $B$ 相乘。下面进行计算复杂度分析，矩阵 A 维度通常为 (M, K)，矩阵 B 维度通常为 (K, N)，则 C 的维度为 (M, N)。如图 1 所示，C 中每个元素是矩阵 A 一行和矩阵 B 一列内积的结果，即计算一个元素需要 K 次乘法和 K-1 次加法，共计 2K-1 次浮点运算。另外，AB 和 C 的放缩通常需要 MN 次浮点运算，AB 和 C 放缩后再相加需要 MN 次，因此总浮点运算数为 (2K+2)MN 次。由于 K>>2，通常视作 2KMN 次浮点运算。
+
+而 SGEMM 则是指单精度通用矩阵乘，为简便计算，下面的 $\alpha$ 和 $\beta$ 分别设置为 1 和 0。
+
+![Desktop View](/assets/img/blog/CUDA/1757076879255.jpg){: width="400" height="400" }
+<center>图 1 通用矩阵乘示意图</center>
+
+### Naive SGEMM Kernel
+
+使用 CUDA 实现最基础的 SGEMM，Kernel 代码如下所示。每个线程计算矩阵 C 中一个数，共使用 M * N 个线程完成整个矩阵的计算。
+
 ```c++
-#define OFFSET(row, col, ld) (((row) * ld) + (col))
-void cpuSgemm(
-    float* a, float* b, float* c,
-    const int M,
-    const int N,
-    const int K,
-    const float alpha = 1.0f,
-    const float beta = 0.0f
-){
-    for (int m = 0; m < M; ++m){
-        for (int n = 0; n < N; ++n){
-            float col = 0.0f;
-            for (int k = 0; k < K; ++k){
-                col += a[OFFSET(m, k, K)] * b[OFFSET(k, n, N)];
-            }
-            c[OFFSET(m, n, N)] = alpha * col + beta * c[OFFSET(m, n, N)];
-        }
-    }
-}
-```
-
-## Naive SGEMM
-简单的数据并行，访存不行
-```c++
+// #define OFFSET(row, col, ld) ((row) * ld + col)
 // dim3 block(32, 32);
 // dim3 grid((N + block.x - 1) / block.x, (M + block.y - 1) / block.y);
 __global__ void naiveSgemmkernel(float* __restrict__ a, float* __restrict__ b, float* __restrict__ c,
     const int M, const int N, const int K, const float alpha, const float beta
 ){
-    int m = blockIdx.x * blockDim.x + threadIdx.x;
-    int n = blockIdx.y * blockDim.y + threadIdx.y;
+    int m = blockIdx.y * blockDim.y + threadIdx.y;
+    int n = blockIdx.x * blockDim.x + threadIdx.x;
     
     if (m < M && n < N){
         float sum = 0.0f;
@@ -57,6 +43,26 @@ __global__ void naiveSgemmkernel(float* __restrict__ a, float* __restrict__ b, f
     }
 }
 ```
+
+矩阵 A，B，C 均是在 global memory 上。下面来分析一下该 kernel 函数中 A、B、C 三个矩阵对 global memory 的读取和写入情况。
+
+读取 Global Memory：
+
+* 对于矩阵 C 中每一个元素计算, 需要读取矩阵 A 中的一行元素; \
+  对于矩阵 C 中同一行的 n 个元素, 需要重复读取矩阵 A 中同一行元素 n 次;
+
+* 对于矩阵 C 中每一个元素计算, 需要读取矩阵 B 中的一列元素; \
+  对于矩阵 C 中同一列的 m 个元素, 需要重复读取矩阵 B 中同一列元素 m 次;
+
+写入 Global Memory：矩阵 C 中的所有元素只需写入一次。
+
+由此可见：
+
+* 对 A 矩阵重复读取 n 次, 共计 m × k × n 次 32bit Global Memory Load操作;
+* 对 B 矩阵重复读取 m 次, 共计 k × n × m 次 32bit Global Memory Load操作;
+* 对 C 矩阵共计 m × n 次 32bit Global Memory Store操作。
+
+
 
 ## SGEMM w/ smem
 利用 Shared Mem 对 SGEMM 进行优化
