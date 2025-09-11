@@ -21,7 +21,7 @@ GPU 编程通常是异构环境（多个CPU，GPU），CPU 和 GPU 通过 PCIe �
 CUDA 编程结构主要涉及四个方面：内存、线程、核函数、错误处理。下面将分别介绍。
 
 ### 1.1 内存
-CUDA提供的API可以分配管理**设备(Device)**上的内存，API接口如下所示。
+CUDA提供的API可以分配管理**设备(Device)**上的内存，API 如下所示。
 
 | 标准C函数 | CUDA C 函数 |   说明   |
 | :-------: | :---------: | :------: |
@@ -30,16 +30,16 @@ CUDA提供的API可以分配管理**设备(Device)**上的内存，API接口如�
 |  memset   | cudaMemset  | 内存设置 |
 |   free    |  cudaFree   | 释放内存 |
 
-`cudaMemcpy` 最关键，是内存拷贝的过程（走总线），可以完成以下几种拷贝过程（cudaMemcpyKind kind）。内存拷贝的方向如字面所示，如果函数执行成功，则会返回 `cudaSuccess`，否则返回 `cudaErrorMemoryAllocation`。
+`cudaMemcpy` 最关键，用于拷贝 Host 内存到 Device 上，能完成下述几种拷贝类型（cudaMemcpyKind）。拷贝方向如参数字面所示，如果函数执行成功，则会返回 `cudaSuccess`，否则返回 `cudaErrorMemoryAllocation`。
 
 ```c++
-cudaError_t cudaMemcpy(void * dst,const void * src,size_t count, cudaMemcpyKind kind)
-/** cudaMemcpyKind 类型：
+/** cudaMemcpyKind 参数：
 * cudaMemcpyHostToHost
 * cudaMemcpyHostToDevice
 * cudaMemcpyDeviceToHost
 * cudaMemcpyDeviceToDevice 
 */
+cudaError_t cudaMemcpy(void * dst,const void * src,size_t count, cudaMemcpyKind kind);
 ```
 
 GPU 内存层次较为复杂，内存层次大致分为：全局内存、共享内存、纹理内存、常量内存、本地内存和寄存器，如 *Fig 2* 所示，后续将进行具体介绍。
@@ -48,9 +48,9 @@ GPU 内存层次较为复杂，内存层次大致分为：全局内存、共享�
 <center><i>Fig 2.</i> CUDA 内存层次 overview</center>
 
 ### 1.2 线程
-CUDA 是 SIMT（Single Instruction, Multi Threads）架构，**多个线程执行同一份代码**，但每个线程拥有独立的寄存器、程序计数器和状态，可根据自身数据条件（如分支判断）选择执行或跳过指令。
+CUDA 是 SIMT（Single Instruction, Multi Threads）架构，**多个线程执行同一份代码**，每个线程拥有独立的寄存器、程序计数器和状态，可根据自身数据条件（如分支判断）选择执行或跳过指令。
 
-“同一份代码”则是核函数。从线程层次角度而言，一个核函数只能有 1 个 grid，1 个 grid 可以有多个 block，1 个 block 可以有很多的线程。即 grid 在编程中的表达形式：`<block_num_dim3, thread_num_dim3>`，具体层次结构如 *Fig 3* 所示。
+核函数则是多个线程执行的“同一份代码”。从线程角度而言，一个核函数只能有 1 个 grid，1 个 grid 可以有多个 block，1 个 block 可以有很多线程。即 grid 在编程中的表达形式：`<block_num_dim3, thread_num_dim3>`，具体层次结构如 *Fig 3* 所示。
 
 ![Desktop View](/assets/img/blog/CUDA/thread.png){: width="400" height="450" }
 <center><i>Fig 3.</i> CUDA 线程层次结构 overview</center>
@@ -64,10 +64,11 @@ struct __device_builtin__ dim3
 }
 ```
 
-需要注意，**不同 block 的线程是物理隔离的，不能相互影响。** 相同 block 内的线程可以完成：（1）同步；（2）共享内存。
+需要注意，**不同 block 内的线程是物理隔离的，不能相互影响。** 相同 block 内的线程可以完成：（1）同步；（2）共享一块内存。
 
-> SIMD vs SIMT
-> SIMD 单指令多数据，属于向量机制，比如，四个数分别加上另外四数字，那么 SIMD 将四个数字到一个向量指令，一条指令即可做四次 add 指令的工作。但是，向量指令不允许每个分支有不同的操作，每次必须填充满（比较三个数，但向量指令长度为四，需要填充一个数）。
+> **SIMD vs SIMT**
+> 
+> SIMD 单指令多数据，属于**向量机制**。例如，2 个 float 数组相加，如果 SIMD 指令长度为 16B，那么可以将 4 个 float 填充到向量寄存器，通过一条向量加法指令即可做 4 次 add 指令的工作。但是，向量指令不允许每个分支有不同的操作，每次必须填充满（例如，剩余 3 个数，但向量指令长度需要 4 个才能填满，则需要填充 1 个数）。
 > 
 > 相比之下，SIMT 中，线程具有单独的资源（如：PC，Reg File），某些线程可以选择不执行。也就是说，同一时刻所有线程被分配给相同的指令，<b>SIMD 必须执行，而 SIMT 可以根据需要不执行</b>。这样 SIMT 保证线程级并行，而 SIMD 则是指令级并行。
 > 
@@ -78,7 +79,6 @@ struct __device_builtin__ dim3
 > 3. 每个 Thread 可以有一个独立的执行路径
 
 ### 1.3 核函数
-核函数（Kernel Function）即 SIMT 架构中多个线程执行的 “同一份代码”，这段代码在 Device 上运行，用 NVCC 编译，产生 GPU 机器码。所以，核函数是 CUDA 程序的核心。
 
 #### 1.3.1 核函数调用
 核函数的调用通过以下 ANSI C 扩展出的 CUDA C 指令。
@@ -86,28 +86,28 @@ struct __device_builtin__ dim3
 kernel_name<<<grid,block>>>(argument list);
 ```
 
-下面是一个示例，当我们配置 <<<4, 8>>>，即 block = 4， thread = 8 时，kernel 的线程分配如下所示：
+下面是一个示例，当配置为 <<<4, 8>>>，即 block = 4， thread = 8 时，核函数的线程分配如图 *Fig 4* 所示。
 ![Desktop View](/assets/img/blog/CUDA/thread-2.png){: width="800" height="450" }
 <center><i>Fig 4.</i> CUDA 线程布局示例</center>
 
-<b>核函数是同时复制到多个线程执行。</b>为了让多线程按照我们的意愿对应到不同的数据，就要给线程一个唯一的标识，由于设备内存是线性的，我们可以根据 `threadIdx` 和 `blockIdx` 来组合获得对应的线程的唯一标识，如 *Fig 5* 所示。
+<b>核函数是同时复制到多个线程执行。</b>为了让多个线程对应到不同的数据，需要给线程一个唯一的标识，由于设备内存是线性的，我们可以根据 `threadIdx` 和 `blockIdx` 来组合获得对应的线程的唯一标识，如 *Fig 5* 所示。
 
 ![Desktop View](/assets/img/blog/CUDA/thread-3.png){: width="550" height="450" }
 <center><i>Fig 5.</i> CUDA 线程布局示例2</center>
 
-当主机 (Host) 启动核函数之后，控制权马上回到主机，而不是主机等待设备完成核函数的运行。如果需要主机 (Host) 等待设备端执行，可以使用下面这个指令。
+当主机 (Host) 启动核函数之后，控制权马上回到主机，而不是主机等待设备完成核函数的运行。如果需要主机 (Host) 等待设备端执行，可以使用下面的同步指令。
 ``` c
 cudaError_t cudaDeviceSynchronize(void);
 ```
 
 #### 1.3.2 核函数编写
-核函数声明模板：`__global__ void kernel_name(argument list);`。CUDA C中还有一些其他的限定符，如下表所示。
+核函数声明模板：`__global__ void kernel_name(argument list);`。CUDA C 中还有一些其他的限定符，如下表所示。
 
-|    限定符    |     执行      |                                            调用                                             | 备注                      |
-| :----------: | :-----------: | :-----------------------------------------------------------------------------------------: | ------------------------- |
-| \_\_global__ | Device 端执行 | 可以从主机调用<br />也可以从 [计算能力](https://developer.nvidia.cn/cuda-gpus) ≥3的设备调用 | 必须有一个void的返回类型  |
-| _\_device__  | Device 端执行 |                                         设备端调用                                          | -                         |
-|  _\_host__   |  Host 端执行  |                                          主机调用                                           | 可以省略 \_\_host\_\_标识 |
+|    限定符    |     执行      |                                               调用                                                | 备注                      |
+| :----------: | :-----------: | :-----------------------------------------------------------------------------------------------: | ------------------------- |
+| \_\_global__ | Device 端执行 | 可以从 Host 调用<br />也可以从 [计算能力](https://developer.nvidia.cn/cuda-gpus) ≥3的 Device 调用 | 必须有一个void的返回类型  |
+| _\_device__  | Device 端执行 |                                           Device 端调用                                           | -                         |
+|  _\_host__   |  Host 端执行  |                                            Host 端调用                                            | 可以省略 \_\_host\_\_标识 |
 
 kernel 函数编写有以下限制：**（1）只能访问 Device 端内存；（2）必须有void返回类型；（3）不支持可变数量的参数；（4）不支持静态变量；（5）显示异步行为。**
 
@@ -216,7 +216,7 @@ __global__ void mathKernel1(float *c)
 * 第一个线程束内的线程编号 tid 从 0 到 31，tid / warpSize 都等于0，那么就都执行 if 语句；
 * 第二个线程束内的线程编号 tid 从 32 到 63，tid / warpSize 都等于1，执行 else；
 
-```
+```c
 __global__ void mathKernel2(float *c)
 {
 	int tid = blockIdx.x* blockDim.x + threadIdx.x;
@@ -242,24 +242,23 @@ Warp 一旦被激活来到片上，就不会再离开 SM 直到执行结束。�
 - 寄存器
 - 共享内存
 
-换句话说，一个 SM 上能激活多少个 Block 和 Warp（Warp是更细的激活粒度，Block -> 多个 Warp 分组）取决于 SM 中可用的寄存器和共享内存，以及 Kernel 所需的寄存器和共享内存大小。这是一个 tradeoff，当kernel 占用的资源较少，那么更多的线程（这是线程越多 Warp 也就越多）处于活跃状态，相反则线程越少，如图 *Fig 8* 所示。
+换句话说，一个 SM 上能激活多少个 Block 或 Warp（实际运行的是 Warp）取决于 SM 中可用的寄存器和共享内存，以及 Kernel 所需的寄存器和共享内存大小。这是一个 tradeoff，当 kernel 占用的资源较少，那么更多的线程处于活跃状态，相反则线程越少，如图 *Fig 8* 所示。
 
 ![Desktop View](/assets/img/blog/CUDA/resource-reg.png){: width="675" height="450" }
 ![Desktop View](/assets/img/blog/CUDA/resource-shared_mem.png){: width="675" height="450" }
 <center><i>Fig 8.</i> 资源分配 Tradeoff 示例 </center>
 
-当寄存器和共享内存分配给了 Block，这个 Block 处于活跃状态，所包含的 Warp 称为活跃线程束。活跃的线程束可分为三类：
+当寄存器和共享内存分配给了 Block，这个 Block 处于活跃状态，所包含的 Warp 称为活跃线程束。活跃的线程束可分为以下三类。
 - 选定的线程束
 - 阻塞的线程束
 - 符合条件的线程束
 
 ​当 SM 执行某个线程束时，执行的这个线程束叫做选定的线程束，准备要执行的叫符合条件的线程束，如果线程束不符合条件还没准备好则为阻塞的线程束。
-​满足下面的要求，线程束才算是符合条件的：（1）32个CUDA核心可以用于执行；（2）执行所需要的资源全部就位。
+​满足下面的要求，线程束才算是符合条件的：（1）32 个 CUDA Core 可以用于执行；（2）执行所需资源全部就位。
 
-​由于计算资源是在 Warp 之间分配的，且 Warp 的整个生命周期都在片上，所以 Warp 上下文切换是非常快速的。因此，如可以通过排布流水，通过大量活跃的线程束切换来实现延迟隐藏。
+​由于计算资源是在 Warp 之间分配的，且 Warp 的整个生命周期都在片上，所以 Warp 上下文切换非常快速。因此，可以通过排布流水来实现 访存-计算 延迟隐藏。
 
-所以，**延迟的隐藏取决于活动的线程束的数量，数量越多**，隐藏的越好，但是线程束的数量又受到上面的说的资源影响。所以这里就需要寻找最优的执行配置来达到最优的延迟隐藏。
-
+由于 Warp 上下文（寄存器状态、程序计数器等）保存在 SM 的片上寄存器文件中，Warp 之间切换开销极小。所以，SM 调度器通过在活跃 Warp 之间轮转计算资源，实现访存与计算的重叠，从而隐藏全局内存访问的延迟，提高硬件利用率。
 
 ## 3.CUDA 内存模型
 
@@ -273,9 +272,7 @@ GPU中最大的内存（即 HBM 内存），可以被所有块上的所有线程
 同一个 Block 内的线程可以通过共享内存共享数据。相比访问全局内存至少**快10倍**。但共享内存的容量有限（A100 192 KB/SM），无法被其他线程块访问。
 
 * **纹理内存和常量内存（Texture and Constant Memory）**
-GPU 中的特殊内存类型，针对访问特定数据类型（例如纹理或常量值）进行了优化。**所有块中的所有线程**都可以访问这些内存类型。
-例如，常量内存专门只能用于存储只读数据，纹理内存只能用于存储二维图像数据，这两种内存类型的访问速度都相当快，可以与共享内存相媲美。
-因此，使用纹理内存和常量内存的目的是优化数据访问并减少共享内存的计算负载。我们可以将一部分数据分配给纹理内存和常量内存，而不是将所有数据推送到共享内存中。这种分配策略通过利用纹理内存和常量内存的优化访问功能来帮助增强内存性能。
+GPU 提供针对特定数据类型优化的特殊内存，如常量内存（只读数据）和纹理内存（二维图像）。**所有线程可访问**这类内存，其访问**速度接近共享内存**。将部分数据放入常量或纹理内存，可优化数据访问，减轻共享内存压力，从而提升整体内存性能。
 
 * **本地内存（Local Memory）**
 每个线程都可以使用自己的本地内存，可以在其中存储临时变量。专用于每个单独的线程。
@@ -313,7 +310,29 @@ __global__ void kernel(const float* __restrict__ A, float* B, int N) {
 
 L1 Cache 是每个 SM 内独有的（和 smem 在物理上是一块存储），L2 Cache 是全局共享的。
 
-### 3.3 shlf 指令
+### 3.3 内存管理
+
+Host 端内存一般采用分页式虚拟内存管理。应用程序所看到的是连续的虚拟地址空间，而对应的物理页帧可能是非连续分布的。操作系统可以在运行时通过页调度，将物理页帧换出到磁盘或映射到不同的物理内存位置，而应用程序对此感知不到。
+
+Host 和 Device 交互时，GPU 会通过 DMA 直接访问 Host 物理地址，但是，如果 Host 的内存可能会在传输过程中发生变化（OS 换入/换出页，修改页表，逻辑指针能通过逻辑地址+页表查出物理地址，但是，**DMA 是直接操作物理地址的**，如果在传输中发生页偏移，将找不到数据）。
+
+通常解决方案为：
+* 锁页（page lock / pinning）：将相关物理页固定，防止被操作系统换出。
+* 临时缓冲区复制（staging buffer copy）：驱动将数据先拷贝到一块 固定页内存
+
+![Desktop View](/assets/img/blog/CUDA/mem_trans.png){: width="480" height="450" }
+<center>Fig 10. CUDA 内存移动，左图是正常分配过程：锁页-复制到固定内存-复制到设备，右图是固定内存，直接传输到设备上</center>
+
+如 *Fig 10* 所示，CUDA 默认采用淋湿缓冲区复制的方法。同时，CUDA 支持锁页机制，通过使用下面的 API 分配/释放 固定内存，这些内存是页面锁定的，可以直接传输到设备的。
+```c
+cudaError_t cudaMallocHost(void ** devPtr,size_t count)
+
+cudaError_t cudaFreeHost(void *ptr)
+```
+
+固定内存的释放和分配成本比可分页内存要高很多，但是传输速度更快，所以对于大规模数据，固定内存效率更高。数据的传输可以通过 CUDA Stream 掩盖，具体见第 4 章节。
+
+### 3.4 shlf 指令
 
 shuffle instruction **作用在 warp 内**，允许两个线程见**相互访问对方的寄存器**，不通过共享内存或者全局内存，延迟极低，且不消耗内存。
 首先提出一个束内线程的概念，英文名 lane，简单的说，就是一个 warp 内的线程 ID，在 【0,31】内，计算方式如下：
@@ -323,7 +342,7 @@ unsigned int LaneID = threadIdx.x % 32;
 unsigned int warpID = threadIdx.x / 32;
 ```
 
-#### 3.3.1 shlf 指令不同形式
+#### 3.4.1 shlf 指令不同形式
 shlf 指令一共有 4 种形式，mask 代表线程掩码，用于指示 warp 内的活跃线程，用 32 bit 表示，例如 `0xffffffff` 则表示全部线程活跃，只有活跃的线程会执行 shlf 指令。mask 能够保证在 warp 内部分线程 inactive 时（例如，分支）， shuffle 行为是安全的。
 * `__shfl_sync`：最通用的版本，任意 lane 寻址，从指定的 srcLane 线程取 var 值。
 ```c
@@ -346,6 +365,7 @@ T __shfl_xor_sync(unsigned mask, T var, int laneMask, int width = warpSize);
 
 上面主要围绕 CUDA Kernel 进行介绍，关注 Device 端的优化，本章节则聚焦于 Host 端怎么优化 CUDA 应用。
 
+### 4.1 CUDA Stream 介绍
 CUDA Stream 是用于组织和调度一系列 GPU 操作的逻辑队列。Host 端提交完异步操作（例如，内存拷贝、核函数启动）后，Device 端会有一个默认 Stream 保存提交的操作（不一定立即执行），之后控制权返回到 Host。如果 Host 端继续遇到下一个异步操作，则继续放入默认 Stream 中。
 
 同一个 Stream 的操作是**顺序执行**的，但是，多个 stream 是**并发执行**的，我们可以自定义 CUDA Stream 实现流水线或双缓冲技术。
@@ -360,11 +380,13 @@ CUDA Stream 是用于组织和调度一系列 GPU 操作的逻辑队列。Host �
 ```c
 cudaError_t cudaMemcpyAsync(void* dst, const void* src, size_t count, cudaMemcpyKind kind, cudaStream_t stream = 0);
 ```
-**执行异步数据传输时，Host 端的内存必须是固定的，非分页的！**
+**执行异步数据传输时，Host 端的内存必须是固定的，非分页的！** 可以通过上文介绍的 `cudaError_t cudaMallocHost(void **ptr, size_t size);` 固定内存。
 
 在非空流中执行内核需要在启动核函数的时候加入一个附加的启动配置，下面是相关 API。
 ```c
 // 创建 Stream
+cudaStream_t stream;
+cudaError_t cudaStreamCreate(cudaStream_t* pStream);
 cudaError_t cudaStreamCreateWithPriority(cudaStream_t* pStream, unsigned int flags,int priority);   // 带优先级
 
 // 查询流优先级
@@ -373,17 +395,88 @@ cudaError_t cudaDeviceGetStreamPriorityRange(int *leastPriority, int *greatestPr
 // 在 Stream 启动 Kernel 需要附带非空流
 kernel_name<<<grid, block, sharedMemSize, stream>>>(argument list);
 
-// Stream Destroy API，调用销毁时，stream 可能还在执行，当 stream 执行完成后才会进行销毁
-cudaError_t cudaStreamDestroy(cudaStream_t stream);
-
-// 查询 Stream 执行进度
-cudaError_t cudaStreamQuery(cudaStream_t stream);
+// 查询 Stream 是否完成
+cudaError_t status = cudaError_t cudaStreamQuery(cudaStream_t stream);
 
 // 同步 Stream 直至完成
 cudaError_t cudaStreamSynchronize(cudaStream_t stream);
+
+// Stream Destroy API，调用销毁时，stream 可能还在执行，当 stream 执行完成后才会进行销毁
+cudaError_t cudaStreamDestroy(cudaStream_t stream);
 ```
 
+下面是一段典型的多流调度 CUDA 操作的示例。
+```c
+for (int i = 0; i < nStreams; i++) {
+    int offset = i * bytesPerStream;
+    cudaMemcpyAsync(&d_a[offset], &a[offset], bytePerStream, streams[i]);
+    kernel<<grid, block, 0, streams[i]>>(&d_a[offset]);
+    cudaMemcpyAsync(&a[offset], &d_a[offset], bytesPerStream, streams[i]);
+}
+for (int i = 0; i < nStreams; i++) {
+    cudaStreamSynchronize(streams[i]);
+}
+```
+假设 nStreams=3，所有传输和核启动都是流水执行的，如图 *Fig 11* 所示。
 
+![Desktop View](/assets/img/blog/CUDA/stream.png){: width="600" height="500" }
+<center>Fig 11. CUDA Stream 示例</center>
+
+非空流可以创建为 阻塞流 和 非阻塞流，**空流是阻塞流**，`cudaStreamCreate` 默认创建阻塞流。阻塞流之间会有隐式同步，当一个阻塞流发生阻塞，其他阻塞流必须等待。
+```c
+// 假设 stream_1 和 stream_2 都是阻塞流
+kernel_1<<<1, 1, 0, stream_1>>>();
+kernel_2<<<1, 1>>>();
+kernel_3<<<1, 1, 0, stream_2>>>();
+```
+
+上面代码中，有 3 个流，阻塞执行，具体过程为：kernel_1 被启动，控制权返回 Host，然后 Host 启动 kernel_2，但是 Device 不会马上执行 kernel_2，它会等到 kernel_1 执行完毕再执行 Kernel_2；同理，启动完 kernel_2 后，Host 继续启动 kernel_3，在 Device 上，kernel_3 会等待直到 kernel_2 执行完。但是，从主机的角度，3 个核都是异步的。
+
+如果想实现并行 3 个流，可以使用下面的 API 创建 非阻塞流，如果上面的 stream_1 和 stream_2 是非阻塞流，则 3 个 Kernel 将并行执行。
+```c
+/**
+*  flags 参数选项
+*  cudaStreamDefault -> 默认阻塞流
+*  cudaStreamNonBlocking -> 非阻塞流
+*/
+cudaError_t cudaStreamCreateWithFlags(cudaStream_t* pStream, unsigned int flags);
+```
+
+流同样可以显示同步，下面是同步流的 API 及介绍。
+
+| API                                          | 阻塞情况                               |
+| -------------------------------------------- | -------------------------------------- |
+| `cudaDeviceSynchronize()`                    | 阻塞主机线程，直到 GPU 上所有任务完成  |
+| `cudaStreamSynchronize(cudaStream_t stream)` | 阻塞主机线程，直到指定流的所有任务完成 |
+| `cudaMemcpy`（同步版本）                     | 阻塞主机线程，直到数据传输完成         |
+
+
+### 4.2 重叠内核执行和数据传输
+
+下面以一个向量加法为例，向量加法各个元素之间不存在依赖关系，通过 `cudaMemcpyAsync` 和多流执行不同位置的向量加法内核，实现重叠内核执行和数据传输。具体代码如下所示。
+
+```c
+cudaStream_t stream[N_SEGMENT];
+for(int i=0;i<N_SEGMENT;i++)
+{
+    CHECK(cudaStreamCreate(&stream[i]));
+}
+cudaEvent_t start,stop;
+cudaEventCreate(&start);
+cudaEventCreate(&stop);
+cudaEventRecord(start,0);
+for(int i=0;i<N_SEGMENT;i++)
+{
+    int ioffset=i*iElem;
+    CHECK(cudaMemcpyAsync(&a_d[ioffset],&a_h[ioffset],nByte/N_SEGMENT,cudaMemcpyHostToDevice,stream[i]));
+    CHECK(cudaMemcpyAsync(&b_d[ioffset],&b_h[ioffset],nByte/N_SEGMENT,cudaMemcpyHostToDevice,stream[i]));
+    sumArraysGPU<<<grid,block,0,stream[i]>>>(&a_d[ioffset],&b_d[ioffset],&res_d[ioffset],iElem);
+    CHECK(cudaMemcpyAsync(&res_from_gpu_h[ioffset],&res_d[ioffset],nByte/N_SEGMENT,cudaMemcpyDeviceToHost,stream[i]));
+}
+//timer
+CHECK(cudaEventRecord(stop, 0));
+CHECK(cudaEventSynchronize(stop));
+```
 
 ## Reference
 [1] https://face2ai.com/program-blog/
