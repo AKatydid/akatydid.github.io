@@ -3,13 +3,13 @@ layout: post
 title: CUDA-Operators-1-SGEMM
 date: 2025-09-01 07:43 +0000
 categories: [CUDA]
-tags: [CUDA, basic]
-pin: true
+tags: [CUDA]
+pin: false
 math: true
 mermaid: true
 ---
 
-本文重点阐述了各类算子的逐步优化过程，涵盖 CUDA 常用算子的实现方法，并对不同算子在实现中的性能瓶颈进行分析。各类算子完整代码请参考个人仓库 [OpenKernels](https://github.com/AKatydid/OpenKernels.git)。
+本系列文章重点阐述了各类算子的逐步优化过程，涵盖 CUDA 常用算子的实现方法，并对不同算子在实现中的性能瓶颈进行分析。各类算子完整代码请参考个人仓库 [OpenKernels](https://github.com/AKatydid/OpenKernels.git)。
 
 ## SGEMM
 
