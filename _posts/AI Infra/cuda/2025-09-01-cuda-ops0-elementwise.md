@@ -1,7 +1,7 @@
 ---
 layout: post
-title: CUDA-Operators-2-elementwise
-date: 2025-09-13 06:52 +0000
+title: CUDA-Operators-0-elementwise
+date: 2025-09-1 06:52 +0000
 categories: [CUDA]
 tags: [CUDA]
 pin: false

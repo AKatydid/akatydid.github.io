@@ -1,7 +1,7 @@
 ---
 layout: post
-title: CUDA-ops2-permute
-date: 2025-09-13 08:48 +0000
+title: CUDA-Operators-2-permute
+date: 2025-09-13 01:48 +0000
 categories: [CUDA]
 tags: [CUDA]
 pin: false

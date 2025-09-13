@@ -1,7 +1,7 @@
 ---
 layout: post
-title: CUDA-Operators-ops-2-sgemv
-date: 2025-09-13 08:45 +0000
+title: CUDA-Operators-1-sgemv
+date: 2025-09-13 00:45 +0000
 categories: [CUDA]
 tags: [CUDA]
 pin: false

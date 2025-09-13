@@ -1,6 +1,6 @@
 ---
 layout: post
-title: CUDA-ops4-softmax
+title: CUDA-Operators-4-softmax
 date: 2025-09-13 08:48 +0000
 categories: [CUDA]
 tags: [CUDA]

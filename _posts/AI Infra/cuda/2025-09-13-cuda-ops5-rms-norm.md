@@ -1,6 +1,6 @@
 ---
 layout: post
-title: CUDA-ops5-rms_norm
+title: CUDA-Operators-5-RMSNorm
 date: 2025-09-13 08:49 +0000
 categories: [CUDA]
 tags: [CUDA]
