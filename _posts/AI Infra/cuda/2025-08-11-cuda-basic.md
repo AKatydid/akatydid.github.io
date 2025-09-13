@@ -4,7 +4,7 @@ title: CUDA-Basic
 date: 2025-08-11 11:38 +0000
 categories: [CUDA]
 tags: [CUDA, basic]
-pin: true
+pin: false
 math: true
 mermaid: true
 ---

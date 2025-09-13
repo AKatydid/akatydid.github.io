@@ -9,7 +9,7 @@ math: true
 mermaid: true
 ---
 
-本系列文章重点阐述了各类算子的逐步优化过程，涵盖 CUDA 常用算子的实现方法，并对不同算子在实现中的性能瓶颈进行分析。各类算子完整代码请参考个人仓库 [OpenKernels](https://github.com/AKatydid/OpenKernels.git)。
+本系列文章重点阐述了各类算子的逐步优化过程，涵盖 CUDA 常用算子，并对不同算子的性能瓶颈进行分析。各类算子完整代码请参考个人仓库 [OpenKernels](https://github.com/AKatydid/OpenKernels.git)。
 
 Element-wise 算子运算时没有数据之间的依赖关系，且运算比较简单，瓶颈在访存上。优化手段一般为：（1）向量化；（2）数学近似。下面以 ReLU 和 GELU 算子为例，展示逐步优化的过程。
 
@@ -105,4 +105,7 @@ __global__ void gelu_f32x4_kernel(float *x, float *y, int N) {
   }
 }
 ```
+
+## reference
+[1] DefTruth, Many Others. LeetCUDA: A Modern CUDA Learn Notes with PyTorch for Beginners. 2025. https://github.com/xlite-dev/LeetCUDA.git.
 
