@@ -342,13 +342,18 @@ unsigned int LaneID = threadIdx.x % 32;
 unsigned int warpID = threadIdx.x / 32;
 ```
 
+例如，在同一个 block 中的 thread_0 和 thread_32 的 lane_id 都为 0。
+
 #### 3.4.1 shlf 指令不同形式
 shlf 指令一共有 4 种形式，mask 代表线程掩码，用于指示 warp 内的活跃线程，用 32 bit 表示，例如 `0xffffffff` 则表示全部线程活跃，只有活跃的线程会执行 shlf 指令。mask 能够保证在 warp 内部分线程 inactive 时（例如，分支）， shuffle 行为是安全的。
-* `__shfl_sync`：最通用的版本，任意 lane 寻址，从指定的 srcLane 线程取 var 值。
+* `__shfl_sync`：最通用的版本，任意 lane 寻址，从指定的 srcLane 线程取 var 值，即**将 srcLane 的 var 值数据广播到所有 mask 的线程中**，如下图示例所示。
 ```c
 T __shfl_sync(unsigned mask, T var, int srcLane, int width = warpSize);
 ```
-* `__shfl_up_sync`：每个线程取 lane_id - delta 的值（如果越界就返回自己的值），常用于前缀和。
+
+![Desktop View](/assets/img/blog/CUDA/shfl_.png){: width="520" height="500" }
+
+* `__shfl_up_sync`：每个线程取 lane_id - delta 的值（如果越界就返回自己的值）。
 ```c
 T __shfl_up_sync(unsigned mask, T var, unsigned delta, int width = warpSize);
 ```
@@ -356,10 +361,25 @@ T __shfl_up_sync(unsigned mask, T var, unsigned delta, int width = warpSize);
 ```c
 T __shfl_down_sync(unsigned mask, T var, unsigned delta, int width = warpSize);
 ```
+`__shfl_up_sync` 和 `__shfl_down_sync` 常用于 Scan 类型算子。从输入角度看，`__shfl_up_sync` 是将 `lane_id → lane_id + delta`，即对应结果角度，当前 lane 线程获取 `lane - delta` 线程的 `val` 寄存器数据。若 `lane - delta < 0`，则**不执行操作**。具体示例，如下图所示。 
+![Desktop View](/assets/img/blog/CUDA/shfl_up_sync.png){: width="500" height="500" }
+而 `__shfl_down_sync` 从结果看，当前 lane 线程获取 `lane + delta` 线程的 `val` 寄存器数据，具体示例如下图所示。
+![Desktop View](/assets/img/blog/CUDA/shfl_down_sync.png){: width="500" height="500" }
+
 * `__shfl_xor_sync`：每个线程取 (lane_id ^ laneMask) 的线程的值，常用于树形归约或交换对称计算
 ```c
 T __shfl_xor_sync(unsigned mask, T var, int laneMask, int width = warpSize);
 ```
+例如，`__shfl_xor_sync` 指令在于理解 lane_id ^ laneMask 这个过程，代码与图例如下所示。
+```c
+#param unroll
+for (int i = 1; i < warpSize; i *= 2){
+  // mask 表示选中的线程，一般为 warp 所有的 32 个线程，即 0xffffffff 或 -1
+  val += __shfl_xor_sync(-1, val, i);
+}
+```
+
+![Desktop View](/assets/img/blog/CUDA/shfl_xor_sync.png){: width="480" height="450" }
 
 ## 4.CUDA Stream
 
@@ -480,3 +500,4 @@ CHECK(cudaEventSynchronize(stop));
 
 ## Reference
 [1] https://face2ai.com/program-blog/
+[2] https://people.maths.ox.ac.uk/gilesm/cuda/lecs/lec4.pdf
