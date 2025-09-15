@@ -12,17 +12,18 @@ mermaid: true
 本系列文章重点阐述了各类算子的逐步优化过程，涵盖 CUDA 常用算子，并对不同算子的性能瓶颈进行分析。各类算子完整代码请参考个人仓库 [OpenKernels](https://github.com/AKatydid/OpenKernels.git)。
 
 ## 1.SGEMV
-SGEMV 表达式为：$Y = A * X$，其中 A(M, K)，X(K, 1)，Y(M,1)，具体计算流程如图 *Fig 1* 所示。首先，以 `K=32`，`K=128`，`K=16` 和 Large K 四种情况，展示如何优化 GEMV 算子。
-最 Naive 的优化为一个线程算 Y 的一个数，即每个线程从 global mem 读取 A 的一行向量，再读取 X 向量，两个向量进行内积。数据利用率低，访存效率低。
+SGEMV 表达式为：$Y = A * X$，其中 A(M, K)，X(K, 1)，Y(M,1)。本文展示了 `K=32`，`K=128`，`K=16` 和 Large K 四种情况下，优化 GEMV 算子的思路和方法。
 
-优化思路总结：
-1. 尽可能让 warp 的 32 个线程繁忙：主要针对 n < 32 的情况，例如 `K=16` 的特例，可以让一个 warp 处理多行元素。
-2. 尽可能地提高访存效率
-   * global mem->register：从 Global Mem 搬数到寄存器上时，最重要的是否考虑了合并访存。
-   * shared mem->register：每个 warp 都需要对x进行一次global上的访存，所以一个block有4次访存。如果将x存储到shared mem中，4个warp都去访问shared mem上的x，这样的话，对于global的访存就从 4 次变成 1 次。但是，使用 shared mem 的话，从 global mem → shared mem 搬数需要同步，可能会带来性能下降。
+最 Naive 的 GEMV 计算流程如图 *Fig 1* 所示，一个线程算 Y 中一个数，即每个线程从 global mem 读取 A 的一行向量，再读取 X 向量，两个向量进行内积。数据利用率低，访存效率低。
 
 ![Desktop View](/assets/img/blog/CUDA/gemv1.png){: width="200" height="350" }
 <center>Fig 1. GEMV 计算流程</center>
+
+总体优化思路如下：
+1. 尽可能让 warp 的 32 个线程繁忙：主要针对 n < 32 的情况，例如 `K=16` 的特例，可以让一个 warp 处理多行元素。
+2. 尽可能地提高访存效率
+   * global mem->register：从 Global Mem 搬数到寄存器上时，最重要的是否考虑了合并访存。
+   * shared mem->register：每个 warp 都需要对向量 X 进行一次 global 上的访存，所以一个 block 访存四次。如果将 X 存储到 shared mem 中，四个 warp 访问 shared mem 上的 X。那么，对于 global 的访存次数从 4 次变成 1 次。**但是，从 global mem → shared mem 搬数需要同步，会带来额外的开销，可能导致性能下降。**
 
 ### 1.1 K=32
 对于 K % 32 == 0 的情况，我们将每个 block 设置为 128，4 个 warp，每个 warp 负责一行元素计算。
@@ -67,7 +68,7 @@ __global__ void sgemv_k32_f32_kernel(float* a, float* b, float* c, const int M, 
 ```
 
 ### 1.2 K=128
-对于 `K % 128 == 0` 的情况，同样让warp负责一行元素的计算，但是因为每行的元素比较多，所以采用了float4进行向量化的访存。能够有更高的访存效率。
+对于 `K % 128 == 0` 的情况，同样让 warp 负责一行元素的计算，但是因为每行的元素比较多，所以采用了float4进行向量化的访存。能够有更高的访存效率。
 
 ```c
 // dim3 block = dim3(32, 4)
@@ -224,8 +225,9 @@ __global__ void sgemv_splitk_smem_f32_kernel(const float * __restrict__ A,
 ```
 
 warp up 10 轮，测试 200 轮的结果如下图所示。
+红框代表最佳的方案。
 
-![Desktop View](/assets/img/blog/CUDA/res-sgemv.png){: width="200" height="350" }
+![Desktop View](/assets/img/blog/CUDA/res-sgemv.png){: width="550" height="350" }
 <center>Fig 2. GEMV 实验结果</center>
 
 
