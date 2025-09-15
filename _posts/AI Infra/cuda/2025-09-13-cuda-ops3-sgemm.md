@@ -268,4 +268,5 @@ __global__ void sgemmKernelV3(float* __restrict__ a, float* __restrict__ b, floa
 
 ## Reference
 [1] https://zhuanlan.zhihu.com/p/657632577
+
 [2] DefTruth, Many Others. LeetCUDA: A Modern CUDA Learn Notes with PyTorch for Beginners. 2025. https://github.com/xlite-dev/LeetCUDA.git.

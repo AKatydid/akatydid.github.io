@@ -500,4 +500,5 @@ CHECK(cudaEventSynchronize(stop));
 
 ## Reference
 [1] https://face2ai.com/program-blog/
+
 [2] https://people.maths.ox.ac.uk/gilesm/cuda/lecs/lec4.pdf
