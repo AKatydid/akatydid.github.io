@@ -1,6 +1,6 @@
 ---
 layout: post
-title: CUDA-Operators-4-softmax
+title: CUDA-Operators-4-Softmax
 date: 2025-09-13 08:48 +0000
 categories: [CUDA]
 tags: [CUDA]
@@ -12,7 +12,7 @@ mermaid: true
 ## 1. Softmax 基本实现
 Softmax 将一个数值向量归一化为一个概率分布向量，且各个概率之和为 1。Softmax 可以用来作为神经网络的最后一层，用于多分类问题的输出。
 
-原始 softmax 中 $\sum e^{x_i}$ 容易导致数值溢出，通常使用 safe softmax，即让 $x_i - max{x}$，以防止数值溢出，具体公式表达如下所示。
+原始 Softmax 中 $\sum e^{x_i}$ 容易导致数值溢出，通常使用 Safe Softmax，即让 $x_i - max(x)$，以防止数值溢出，具体公式表达如下所示。
 
 $$
 m = max(x)
@@ -51,7 +51,9 @@ Softmax 中需要执行三次循环，最关键是 max 和 sum 两个 reduce 操
  * dim3 block(BLOCK_SIZE)
  * dim3 grid((N + BLOCK_SIZE -1) / BLOCK_SIZE)
  */
-__global__ void softmax_forward_naive_f32_kernel(float* out, const float* inp, int N, int C) {
+__global__ void softmax_forward_naive_f32_kernel(
+  float* out, const float* inp, int N, int C
+) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < N) {
         const float* inp_row = inp + i * C;
@@ -78,7 +80,7 @@ __global__ void softmax_forward_naive_f32_kernel(float* out, const float* inp, i
 ### 1.2 Shared mem 实现 (V2)
 V1 版本实现过于 Naive，每个线程算一行，导致：（1）单个线程任务很重，并行性不足；（2）三次访存都从 global mem 取，访存效率低。
 
-下面的优化版本中，让每个 block 计算一行元素，并使用 shared mem 缓存**归约结果**。代码如下所示
+下面的优化版本中，让每个 block 计算一行元素，并使用 shared mem 缓存**归约结果**。代码如下所示。
 
 ```c
 /**
@@ -91,7 +93,9 @@ V1 版本实现过于 Naive，每个线程算一行，导致：（1）单个线�
  * size_t smem_size = BLOCK_SIZE * sizeof(float)
  * softmax_forward_smem_f32_kernel<<<grid, block, smem_size>>>(out, inp, N, C);
  */
-__global__ void softmax_forward_smem_f32_kernel(float* out, const float* inp, int N, int C) {
+__global__ void softmax_forward_smem_f32_kernel(
+  float* out, const float* inp, int N, int C
+){
   extern __shared__ float shared[];
   int idx = blockIdx.x;   // ranges [0, N)
   int tid = threadIdx.x;  // ranges [0, block_size)
@@ -139,7 +143,8 @@ __global__ void softmax_forward_smem_f32_kernel(float* out, const float* inp, in
 
 ### 1.3 Shared mem + Warp Reduce 优化 (V3)
 
-归约过程可以使用 warp reduce 直接在寄存器中实现优化，分块为 `grid((N + BN - 1) / BN)` 和 `block(BC, BN)`。即每个 block 计算 BN 行结果，每个线程处理 (C + BC - 1) / BC 个数，线程视角的归约计算流程如下。
+归约过程可以使用 warp reduce 直接在寄存器中实现优化，分块为 `grid((N + BN - 1) / BN)` 和 `block(BC, BN)`。即每个 block 计算 BN 行结果，每个线程处理 (C + BC - 1) / BC 个数，线程视角的归约计算流程如下所示。
+block 归约也是同样的过程：warp 内归约，然后写入 shared mem， 最后 shared mem 广播。
 
 * 每个线程计算 (C + BC - 1) / BC 个数，即初步归约到 0...BC-1 线程；
 * 对 0...BC-1 线程的每个 warp 做 warp reduce，每个 warp 的结果缓存在 smem 中；
@@ -161,7 +166,9 @@ __global__ void softmax_forward_smem_f32_kernel(float* out, const float* inp, in
  * block(BC, BN)
  */
 template <const int BN, const int BC>
-__global__ void softmax_forward_warp_smem_f32_kernel(float* out, const float* inp, int N, int C){
+__global__ void softmax_forward_warp_smem_f32_kernel(
+  float* out, const float* inp, int N, int C
+){
   // shared memory is used for inter-warp reduction
   __shared__ float smem[BN][2][BC];
   int tx = threadIdx.x;
@@ -271,7 +278,7 @@ struct __align__(8) SumMax
   float sum;
 };
 
-__device__ __forceinline__ SumMax reduce_sum_max_op(SumMax a, SumMax b) {
+__device__ __inline__ SumMax reduce_sum_max_op(SumMax a, SumMax b) {
   bool a_bigger = (a.maxval > b.maxval);
   SumMax bigger_m = a_bigger ? a : b;
   SumMax smaller_m = a_bigger ? b : a;
@@ -287,7 +294,9 @@ __device__ __forceinline__ SumMax reduce_sum_max_op(SumMax a, SumMax b) {
  * dim3 grid((N + BLOCK_SIZE / 32 - 1) / (BLOCK_SIZE / 32))
  * dim3 block(BLOCK_SIZE)
  */
-__global__ void softmax_forward_online_kernel2(float* out, const float* inp, int N, int C) {
+__global__ void softmax_forward_online_kernel(
+  float* out, const float* inp, int N, int C
+){
 	cg::thread_block block = cg::this_thread_block();
 	cg::thread_block_tile<32> warp = cg::tiled_partition<32>(block);
 	int idx = blockIdx.x * warp.meta_group_size() + warp.meta_group_rank();

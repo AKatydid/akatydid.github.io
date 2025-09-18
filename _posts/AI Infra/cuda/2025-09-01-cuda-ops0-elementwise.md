@@ -1,6 +1,6 @@
 ---
 layout: post
-title: CUDA-Operators-0-elementwise
+title: CUDA-Operators-0-Activate
 date: 2025-09-1 06:52 +0000
 categories: [CUDA]
 tags: [CUDA]

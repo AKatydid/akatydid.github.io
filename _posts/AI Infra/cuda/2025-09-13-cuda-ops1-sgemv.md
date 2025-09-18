@@ -1,6 +1,6 @@
 ---
 layout: post
-title: CUDA-Operators-1-sgemv
+title: CUDA-Operators-1-SGEMV
 date: 2025-09-13 00:45 +0000
 categories: [CUDA]
 tags: [CUDA]
