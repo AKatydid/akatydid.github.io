@@ -18,9 +18,9 @@ picture:
 | [PPO](#二ppo)   | (17.07)OpenAI    | 标准的 RL 训练范式，通过 clip、KL散度等措施限制策略更新幅度，实现稳定训练。<br> 但是LLM中 Value Model 难训，自然语言噪声大，难以根据当前片段预测未来得分。<br> 此外奖励模型基于 SFT 分布训练，RL 后易造成**分布偏移问题**。 |  |
 | [GRPO](#三grpo) | (25.01)DeepSeek  | 提出组优化思路，在组内对奖励做归一化，无需训练 Value Model。 <br>  但仅在序列末尾分配奖励会导致梯度信号稀疏，且组内奖励存在**奖励坍塌问题**。                                                                               |
 | [DAPO](#四dapo) | (25.03)字节,清华 | 在 GRPO 基础上加入大量工程改进：Clip-Higher、动态采样、Token 级信度分配。<br>一定程度缓解大模型 RL 训练瓶颈，但仍停留在 token 级。                                                                                          |
-| [GSPO](#五gspo) | (25.07)阿里      | 实现范式转变，将 off-policy 与 clip 全部提升到**序列级**，显著降低方差，兼具算法简洁性与性能表现，已成为 Qwen3 RL 的核心实践框架。                                                                                          |
-| [GFPO](#六gfpo) | (25.08)微软      | 针对同时优化多个所需属性的目标进行优化，加入数据过滤操作。                                                                                                                                                                  |
-| [GDPO](#七gdpo) | (26.01)NVIDIA    | 针对“正确性/格式/长度/安全/偏好...”的多目标奖励混合，计算 advantage 时做解耦。                                                                                                                                              |
+| [GSPO](#五gspo) | (25.07)阿里      | 将 off-policy 与 clip 全部提升到**序列级**。<br> 显著降低方差，兼具算法简洁性与性能表现，已成为 Qwen3 RL 的核心实践框架。                                                                                                   |
+| [GFPO](#六gfpo) | (25.08)微软      | 在 GRPO 上加入拒绝采样，在保持推理链准确并解决训练时Token迅速膨胀的问题。                                                                                                                                                   |
+| [GDPO](#七gdpo) | (26.01)NVIDIA    | 多奖励独立归一化、解耦计算优势。<br>防止不同目标的奖励信号坍缩，提升多目标优化稳定性。                                                                                                                                      |
 
 ## 一、RL 如何与 LLM 结合？
 
@@ -236,75 +236,96 @@ $$
 
 ## 五、GSPO
 
-优化目标由 token 变到序列级，重要性采样在序列，其重要性比值基于整个序列的似然度计算。
+优化目标由 token 变到序列级，其重要性比值基于整个序列的似然度计算。
 
+$$
+\small{
+\begin{align*}
+\mathcal{J}_{\text{GSPO}}(\theta) &= \mathbb{E}\left[ x \sim \mathcal{D}, \{y_i\}_{i=1}^G \sim \pi_{\theta_{\text{old}}}(\cdot|x) \right] \\
+&\quad \frac{1}{G} \sum_{i=1}^G \Bigg\{
+\min\Bigg[
+s_i(\theta) \hat{A}_i,\,
+\mathrm{clip}\big(
+s_i(\theta),\, 1-\varepsilon,\, 1+\varepsilon
+\big) \hat{A}_i
+\Bigg] \\
+&\quad - \beta \mathrm{D}_{\mathrm{KL}}\big[\pi_{\theta} \parallel \pi_{\theta_{\text{old}}}\big]
++ \gamma \,\text{Entropy}\big(\pi_{\theta}\big)
+\Bigg\}
+\\
+\text{where }
+\\
+s_i(\theta) &= \left( \frac{\pi_{\theta}(y_i \mid x)}{\pi_{\theta_{\text{old}}}(y_i \mid x)} \right)^{\frac{1}{|y_i|}}
+= \exp\left( \frac{1}{|y_i|} \sum_{t=1}^{|y_i|} \log\frac{\pi_{\theta}(y_{i,t}|x,y_{i,<t})}{\pi_{\theta_{\text{old}}}(y_{i,t}|x,y_{i,<t})} \right), \\
+\mu_G &= \frac{1}{G}\sum_{i=1}^G r(x,y_i),\quad
+\sigma_G = \sqrt{\frac{1}{G}\sum_{i=1}^G \big(r(x,y_i)-\mu_G\big)^2}, \quad
+\hat{A}_i = \frac{r(x,y_i)-\mu_G}{\sigma_G}, \\
+\pi_{\theta}(y_i|x) &= \prod_{t=1}^{|y_i|}\pi_{\theta}(y_{i,t}|x,y_{i,<t}).
+\end{align*}
+}
+$$
 
-
-
+核心点：
+* 对同一查询生成一组响应，直接以**完整序列的联合概率比构造重要性权重**，并做长度归一化以稳定数值；
+* 在**序列层面执行 clip**，过滤掉过偏离策略的样本，让同一序列内所有 Token 共享同一个稳定权重，避免单 Token 权重震荡带来的训练失效；
+* 在组内做奖励标准化，让优化目标与奖励的序列级单元完全对齐。
 
 ## 六、GFPO
 
-GFPO 可以理解为“带过滤机制的多属性策略优化”范式，目标是同时优化多个属性（如正确性、格式、长度、可读性、安全性），并降低不同属性奖励尺度不一致带来的训练干扰。
+核心思路是：**在训练阶段增大采样规模并执行拒绝采样过滤**，让模型只学习**更短、更准确**的推理链，从根源解决 GRPO 训练中 Token 长度快速膨胀的问题，同时保持推理精度。
 
-设多属性奖励为 $\{r^{(1)}, r^{(2)}, ..., r^{(K)}\}$，常见做法是构造聚合奖励：
+对每个问题采样更大的候选响应组，扩充样本池以覆盖更多高质量短推理链；随后依据**响应长度或Token Efficiency指标**进行显式过滤，仅保留 top-k 最优响应参与策略梯度更新，不符合目标属性的响应直接屏蔽梯度。
+在过滤出优选响应后，仅在该子集内计算标准化优势函数，实现隐式奖励塑形。
+
+该方法无需复杂奖励设计，即可同时优化推理精度与生成长度，在保持 GRPO 级别推理能力的前提下，大幅削减冗余 Token，实现训练算力与推理效率的高效置换。
 
 $$
-r_{mix}=\sum_{k=1}^{K} w_k \cdot \hat{r}^{(k)}
+\small{
+\begin{align*}
+\mathcal{J}_{\text{GFPO}}(\theta) &= \mathbb{E}\left[ q \sim P(Q), \{o_i\}_{i=1}^G \sim \pi_{\theta_{\text{old}}}(O|q) \right] \nonumber \\
+&\quad \frac{1}{\sum_{i=1}^G |o_i|} \sum_{i=1}^G \sum_{t=1}^{|o_i|} \Bigg\{
+\min\Bigg[
+\frac{\pi_{\theta}(o_{i,t}|q, o_{i,<t})}{\pi_{\theta_{\text{old}}}(o_{i,t}|q, o_{i,<t})} \hat{A}_{i,t}^{(m)},\,
+\mathrm{clip}\Bigg(
+\frac{\pi_{\theta}(o_{i,t}|q, o_{i,<t})}{\pi_{\theta_{\text{old}}}(o_{i,t}|q, o_{i,<t})},\,
+1-\varepsilon,\, 1+\varepsilon
+\Bigg) \hat{A}_{i,t}^{(m)}
+\Bigg] \nonumber \\
+&\quad - \beta \mathrm{D}_{\mathrm{KL}}\big[\pi_{\theta} \parallel \pi_{\theta_{\text{old}}}\big]
++ \gamma \,\text{Entropy}\big(\pi_{\theta}\big)
+\Bigg\}
+\\
+\text{where }
+\\
+&\mathcal{S},\, m = \text{RejectionSample}(\mathcal{G},\, k,\, \text{metric},\, \text{order}), \quad
+m_i = \mathbb{I}_{\{i \in \mathcal{S}\}}
+\\
+&
+  \mu_S = \frac{1}{k} \sum_{i \in S} R(q, o_i), 
+  \quad
+  \sigma_S = \sqrt{\frac{1}{k} \sum_{i \in S} \big(R(q, o_i) - \mu_S\big)^2}, 
+  \quad
+  \hat{A}_{i,t}^{(m)} = \frac{R(q, o_i) - \mu_S}{\sigma_S} \cdot m_i, \\
+&
+  r_{i,t} = \frac{\pi_{\theta}(o_{i,t}|q, o_{i,<t})}{\pi_{\theta_{\text{old}}}(o_{i,t}|q, o_{i,<t})}.
+\end{align*}
+}
 $$
-
-其中 $\hat{r}^{(k)}$ 是归一化后的属性分数，$w_k$ 是任务权重。
-
-GFPO 的关键不只在“加权求和”，还在于**过滤策略（Filtering）**：
-
-1. 过滤低信息量样本（例如各属性都接近满分或全低分）。
-2. 提升边界样本占比（属性冲突最明显的样本更能提供有效梯度）。
-3. 对异常奖励样本做截断或重采样，抑制训练震荡。
-
-**直观收益：**
-相比只看单一 reward 的 RL，GFPO 更容易把模型推向“多指标均衡”解，而不是在单个指标上过拟合。
-
-**难点：**
-权重 $w_k$、过滤阈值与各属性归一化方式对结果非常敏感，需要结合具体业务目标反复调参。
 
 ## 七、GDPO
 
+multi-reward RL（正确性/格式/长度...）一起优化是后训练的趋势，默认的做法是：把多个reward加起来，直接跑 GRPO / PPO。
+但是，默认做法容易出现问题：reward 加得越多，训练反而越不稳/越难涨。
 
-GDPO 的出发点是：在多目标 RL 中，问题往往不只在 reward 聚合本身，而在**advantage 估计时目标互相“抢梯度”**。
-因此 GDPO 强调在 advantage 计算阶段进行解耦（Decoupled Advantage）。
-
-一种常见写法是先按目标分别估计优势：
-
-$$
-A^{(k)} = \mathrm{Advantage}(r^{(k)}),\quad k=1,2,...,K
-$$
-
-再通过可控聚合器形成最终更新信号：
-
-$$
-A_{final}=\mathcal{G}(A^{(1)},A^{(2)},...,A^{(K)})
-$$
-
-其中 $\mathcal{G}$ 可以是加权和、分段门控、或基于约束的投影聚合。
-
-### GDPO 的价值
-
-1. **减少目标冲突**
-例如“正确性提升”与“长度压缩”常互相拉扯，解耦后可单独控制各目标更新强度。
-
-2. **提升可解释性**
-可以明确观察每个目标对参数更新的贡献，便于定位训练退化来源。
-
-3. **更适合安全/偏好/格式等复合约束场景**
-当业务侧强调“必须同时满足多个底线约束”时，GDPO 的分目标控制更有工程价值。
-
-**实践提醒：**
-GDPO 虽能降低目标间干扰，但训练管线复杂度更高，需要更精细的监控指标（各目标 reward、各目标 advantage 方差、冲突率等）。
+GDPO 发现：
+在 multi-reward 场景下，GRPO 会把本来不同的 reward 组合“压扁”成几乎一样的 advantage，导致**训练信号分辨率下降，奖励收敛效果不佳**，结果是在许多情况下早期训练直接失败。
 
 
-## Reference
-[1] 知乎：如何改善GRPO的稳定性. https://zhuanlan.zhihu.com/p/1972697530946041490.
+![Desktop View](assets/img/blog/RL_Algo_for_LLMs/GDPO_formula.png){: width="600" height="400" }
 
-[2] DAPO: An Open-Source LLM Reinforcement Learning System at Scale. https://arxiv.org/abs/2503.14476.
+因此，GDPO 提出“组奖励解耦归一化”，针对不同偏好的奖励解耦。
 
-[3] Group Sequence Policy Optimization. https://arxiv.org/abs/2507.18071.
+* 逐 reward 解耦归一化：每个 reward 先各自做 group-wise normalization，把“细粒度差异”保住
+* 再做 batch-wise advantage normalization：保证 reward 数量变多时数值尺度不炸，训练更稳
 
+多奖励RL的关键不是“加更多reward”，而是保留各个维度的 advantage，“别让 advantage 先坍塌”。
