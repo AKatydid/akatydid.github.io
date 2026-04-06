@@ -3,7 +3,7 @@ layout: post
 title: LLM-Training-Overview
 date: 2025-08-10 13:58 +0000
 categories: [LLM]
-tags: [llm, training]
+tags: [LLM, Training]
 pin: true
 math: true
 mermaid: true
