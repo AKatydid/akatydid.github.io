@@ -1,10 +1,10 @@
 ---
 layout: post
-title: LLMs 面经
+title: LLMs interview Experence
 date: 2025-09-02 03:38 +0000
 
-categories: [面经]
-tags: [面经]
+categories: [interview EXP]
+tags: [LLMs]
 pin: false
 math: true
 mermaid: true

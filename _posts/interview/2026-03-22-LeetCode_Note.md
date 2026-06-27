@@ -1,7 +1,9 @@
 ---
 layout: post
-title: 算法刷题笔记
+title: LeetCode Note
 date: 2026-03-22 10:44 +0000
+categories: [面经]
+tags: [面经]
 ---
 
 <style>

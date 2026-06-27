@@ -1,10 +1,10 @@
 ---
 layout: post
-title: C++ 面经
+title: C/C++ interview Experence 
 date: 2025-09-01 15:44 +0000
 
-categories: [面经]
-tags: [面经]
+categories: [interview EXP]
+tags: [cpp]
 pin: false
 math: true
 mermaid: true

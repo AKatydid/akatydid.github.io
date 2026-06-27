@@ -2,8 +2,8 @@
 layout: post
 title: RL-Algo-for-LLMs
 date: 2026-02-24 06:44 +0000
-categories: [LLM]
-tags: [LLM, RL, Training]
+categories: [algorithm]
+tags: [LLMs, RL]
 pin: true
 math: true
 mermaid: true

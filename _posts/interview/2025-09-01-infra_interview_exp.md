@@ -1,9 +1,9 @@
 ---
 layout: post
-title: AI Infra 面经
+title: AI Infra interview Experence
 date: 2025-09-01 15:41 +0000
-categories: [面经]
-tags: [面经]
+categories: [interview EXP]
+tags: [Infra]
 pin: false
 math: true
 mermaid: true
