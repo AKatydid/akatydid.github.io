@@ -524,12 +524,78 @@ $$
 ## 3. MoE 并行
 
 模型规模的扩展会导致训练成本显著增加，计算资源的限制成为了大规模密集模型训练的瓶颈。
-为了解决这一问题，一种基于稀疏 MoE 层<a href="#ref-9">[9]</a>的深度学习模型架构被提出，即将大模型拆分成多个小模型（即 Expert），每轮迭代根据样本决定激活一部分专家用于计算，达到了节省计算资源的效果。
+为了解决这一问题，一种基于稀疏 MoE 层<a href="#ref-9">[9]</a>的深度学习模型架构被提出，即将大模型拆分成多个小模型，每个小模型被称为专家（Expert），每轮迭代根据样本决定激活一部分专家用于计算，达到了节省计算资源的效果。
+
+与 Dense 模型不同的是，MoE 将模型某一层扩展为多个具有相同结构的专家网络，并由 Gate 网络激活哪些 Expert 用于计算，从而实现超大规模稀疏模型的训练，具体如*Fig 18*所示。
 
 ![Desktop View](assets/img/blog/paral_schemes/moe.jpg){: width="500" }
 <center>Fig 18. MoE 网络结构</center>
 
-，模型包含 3 个模型层，如(a)到(b)所示，将中间层扩展为具有 n 个 expert 的 MoE 结构，并引入 Gating network 和 Top_k 机制，MoE 细节如下图(c)所示
+MoE 计算公式为：
+
+$$
+MoE(x) = \sum^{n}_{i=1}(G_i(x)E_i(x))
+$$
+
+其中，$\sum_{i=1}^{N}G_i(x)=1$。在实际训练中，为降低计算量，并不会激活所有 Expert，而是采用 **Top-K Routing**，仅选择权重最大的 $K$ 个 Expert 参与计算。
+
+因此，实际 MoE 计算公式为：
+
+$$
+\operatorname{MoE}(x)
+=
+\sum_{i\in\operatorname{TopK}(G(x))}
+G_i(x)\,E_i(x).
+$$
+
+### 3.1 MoE 并行策略
+
+**（1）MOE + 数据并行：**门网络(gate)和专家网络都被复制地放置在各个运算单元上。*Fig 19* 展示了一个有三个专家的两路数据并行MoE模型进行前向计算的方式。
+该方式唯一的问题是，专家的数量受到单个计算单元(如：GPU)的内存大小限制。
+
+![Desktop View](assets/img/blog/paral_schemes/moe_edp.png){: width="500" }
+<center>Fig 19. MoE + 数据并行 </center>
+
+**（2）MOE + 模型并行：**门网络依然是复制地被放置在每个计算单元上，但是**专家网络被独立地分别放置在各个计算单元上。**因此，需引入额外的通信操作，该策略可以允许更多的专家网络们同时被训练，而其数量限制与计算单元的数量(如：GPU数量)是正相关的，具体如*Fig 20*所示。
+
+![Desktop View](assets/img/blog/paral_schemes/moe_tp.png){: width="500" }
+<center>Fig 20. MoE + 模型并行 </center>
+
+
+### 3.2 业界 MoE 并行策略
+
+#### 3.2.1 GShard
+
+如 *Fig 21* 所示，GShard <a href="#ref-10">[10]</a> 是 Google 提出的第一个将 MoE 的思想拓展到 Transformer 上的工作。具体的做法就是把 Transformer 的 encoder 和 decoder 中每隔一个（every other）的FFN层，替换成 position-wise 的 MoE 层，使用的都是 Top-2 gating network。
+
+![Desktop View](assets/img/blog/paral_schemes/moe_gshared.png){: width="700" }
+<center>Fig 21. GShared 中 MoE 模型架构 </center>
+
+此处之外，GShard还加入了很多其他设计：
+
+* Expert capacity balancing：强制每个expert处理的tokens数量在一定范围内。
+* Local group dispatching：通过把一个batch内所有的tokens分组，来实现并行化计算。
+* Auxiliary loss：为了缓解“赢者通吃”问题，尽可能把token均分给各个专家。
+* Random routing：在Top-2 gating的设计下，两个expert如何更高效地进行routing。
+
+#### 3.2.2 Switch Transformer
+虽然 GShard 能够提升模型容量，但 Top-2 Routing 需要同时调度两个 Expert，导致 Token Dispatch 与通信开销较大。
+Google 随后提出 Switch Transformer<a href="#ref-11">[11]</a>，将 GShard 的 **Top-2 Routing** 简化为 **Top-1 Routing**，即每个 Token 仅选择一个 Expert，具体如*Fig 22*所示。
+这一改动使每个 Token 只需经过一次 Expert 计算，显著降低了 All-to-All 通信开销，同时减少了显存占用，提高了训练吞吐率。
+
+![Desktop View](assets/img/blog/paral_schemes/moe_switch_transformer.png){: width="700" }
+<center>Fig 22. Switch Transformer </center>
+
+#### 3.2.3 DeepSeekMoE
+
+近年来，DeepSeek 提出了 DeepSeekMoE<a href="#ref-12">[12]</a>，进一步改进了传统 MoE 的 Expert 设计。
+
+传统 MoE 的每个 Expert 都是一个完整的 FFN，不同 Expert 之间容易学习到相似知识，导致参数利用率较低。DeepSeekMoE 将一个大型 Expert 划分为多个 **Fine-grained Expert**，使 Routing 粒度更加细致，提高了 Expert 的专业化程度。
+
+此外，DeepSeekMoE 引入了 **Shared Expert**。Shared Expert 会被所有 Token 激活，用于学习不同任务共享的通用知识；而 Routed Expert 则继续采用动态 Routing，仅负责学习特定领域知识，具体如*Fig 23*所示。
+
+![Desktop View](assets/img/blog/paral_schemes/moe_ds.png){: width="700" }
+<center>Fig 23. DeepSeek Shared MoE </center>
 
 
 ## Reference
@@ -550,3 +616,9 @@ $$
 <span id="ref-8"></span>[8] Van De Geijn R A, Watts J. SUMMA: Scalable universal matrix multiplication algorithm[J]. Concurrency: Practice and Experience, 1997, 9(4): 255-274.
 
 <span id="ref-9"></span>[9] Shazeer N, Mirhoseini A, Maziarz K, et al. Outrageously large neural networks: The sparsely-gated mixture-of-experts layer. arXiv preprint arXiv:1701.06538, 2017.
+
+<span id="ref-10"></span>[10] Lepikhin D, Lee H, Xu Y, et al. GShard: Scaling giant models with conditional computation and automatic sharding[C]//International Conference on Learning Representations (ICLR). 2021.
+
+<span id="ref-11"></span>[11] Fedus W, Zoph B, Shazeer N. Switch transformers: Scaling to trillion parameter models with simple and efficient sparsity[J]. Journal of Machine Learning Research, 2022, 23(120): 1-39.
+
+<span id="ref-12"></span>[12] Dai D, Deng C, Zhao C, et al. DeepSeekMoE: Towards ultimate expert specialization in mixture-of-experts language models. arXiv preprint arXiv:2401.06066, 2024.
