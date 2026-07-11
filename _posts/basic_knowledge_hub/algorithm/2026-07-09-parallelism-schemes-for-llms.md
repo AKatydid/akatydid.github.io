@@ -77,7 +77,7 @@ DP 的缺点十分明显，具体如下。
 
 `torch.nn.DistributedDataParallel` 基于多进程实现，每个进程都有独立的优化器，每个进程都执行相同的任务，并且每个进程都与所有其他进程通信，不同进程之间只传递梯度。
 
-流程示意图如下所示。
+流程示意图如下。
 ```
 Process0              Process1
  GPU0                  GPU1
@@ -157,27 +157,27 @@ ZeRO 根据模型状态分片程度不同，共分为三个阶段：
 * ZeRO-3 : 优化器状态、梯度和模型权重参数分片（Optimizer States & Gradients & Parameters Sharding）
 
 ![Desktop View](assets/img/blog/paral_schemes/zero.jpg){: width="700"}
-<center>不同ZeRO 分块比较 <a href="#ref-3">[3]</a></center>
+<center>Fig 1. 不同ZeRO 分块比较 <a href="#ref-3">[3]</a></center>
 
 PyTorch FSDP 可以看作是 PyTorch 官方对于 ZeRO-3 的实现。与 DDP 不同，FSDP 将模型参数、梯度以及优化器状态全部按照数据并行组进行分片，每张 GPU 仅保存自身负责的一部分数据，而不是完整副本。
 
 ![Desktop View](assets/img/blog/paral_schemes/fsdp.jpg){: width="600"}
-<center>FSDP 算法概述 <a href="#ref-2">[2]</a></center>
+<center>Fig 2. FSDP 算法概述 <a href="#ref-2">[2]</a></center>
 
 与 DDP 使用 All-Reduce 同步梯度不同，FSDP 需要在训练过程中动态收集参数并重新分片，因此 All-Reduce 已无法满足需求。
 
 > PS —— All-Reduce = Reduce-Scatter + All-Gather
 > ![Desktop View](assets/img/blog/paral_schemes/all_reduce.jpg){: width="550"}
-> <center>All Reduce 示例</center>
+> <center>Fig 3. All Reduce 示例</center>
 
-如下图所示，与 DDP 不同，FSDP 并不会在每张 GPU 上保存完整模型，而是将模型参数按照数据并行组进行分片。
+如 *Fig 4* 所示，与 DDP 不同，FSDP 并不会在每张 GPU 上保存完整模型，而是将模型参数按照数据并行组进行分片。
 每张 GPU 仅维护属于自己的参数分片，在真正需要计算时才临时恢复完整参数，计算完成后立即释放，因此能够显著降低训练过程中的峰值显存占用。
 
 此外，FSDP 支持 CPU Offload。当 GPU 显存仍然不足时，可以将暂时不参与计算的参数分片、梯度甚至优化器状态 **Offload 到 CPU 内存**，在需要时再重新加载回 GPU，以进一步降低 GPU 的显存压力。
 **代价则是增加了 CPU 与 GPU 之间的数据传输开销。**
 
 ![Desktop View](assets/img/blog/paral_schemes/fsdp_process.png){: width="800" height="600" }
-<center>FSDP 具体过程</center>
+<center>Fig 4. FSDP 具体过程</center>
 
 具体流程为：
 
@@ -223,33 +223,33 @@ fsdp_model = FullyShardedDataParallel(
 一种更直接的思路是不再复制模型，而是拆分模型。
 模型并行正是基于这一思想：将模型划分为多个部分，并分别部署到不同 GPU 上，每张 GPU 仅负责模型中的一部分计算，从而突破单卡显存限制。
 
-如下图所示，模型并行主要分为两类：
+如 *Fig 5* 所示，模型并行主要分为两类：
 * 张量并行（Tensor Parallelism, TP）：对单个 Layer 内部切分，**层内并行**。
 * 流水线并行（Pipeline Parallelism, PP）：对 Layer 切分，将不同 Layer 部署到不同 GPU 上，**层间并行**。
 
 ![Desktop View](assets/img/blog/paral_schemes/pp_instance.png){: width="800"}
-<center>两种流水线并行模式</center>
+<center>Fig 5. 两种流水线并行模式</center>
 
 ### 2.1 流水线并行
 
 PP 是一种典型的层间并行。它将模型按照网络层划分为多个 Stage，并部署到不同 GPU 上，每张 GPU 仅负责部分 Layer 的计算。
 不同 Stage 之间通过传递 Activation 和 Gradient 协同完成一次完整的训练。
 
-根据 PP 策略不同，目前主流的流水线并行可以分为两类，如下图所示：
+根据 PP 策略不同，目前主流的流水线并行可以分为两类，如 *Fig 6* 所示：
 * `F-then-B`：先完成所有 Forward，然后统一执行 Backward；
 * `1F1B`：流水线填满后，每个 Stage 交替执行一次 Forward 和一次 Backward，从而减少激活缓存并降低 Pipeline Bubble。
 
 ![Desktop View](assets/img/blog/paral_schemes/pp_method.png){: width="800" }
-<center>两种流水线并行策略</center>
+<center>Fig 6. 两种流水线并行策略</center>
 
 本章节将按照这一发展脉络，依次介绍朴素流水线、GPipe<a href="#ref-4">[4]</a> 以及非交错式 1F1B<a href="#ref-5">[5]</a> 等典型流水线调度策略。
 
 #### 2.1.1 朴素流水线并行
 朴素流水线并行是流水线并行最直接的实现方式。
-如下图所示，它将模型按照层间切分成多个部 Stage，每个 Stage 部署到不同 GPU 上，每张 GPU 仅负责本阶段对应层的计算。
+如 *Fig 7* 所示，它将模型按照层间切分成多个部 Stage，每个 Stage 部署到不同 GPU 上，每张 GPU 仅负责本阶段对应层的计算。
 
 ![Desktop View](assets/img/blog/paral_schemes/pp_naive.png){: width="600"}
-<center>朴素流水线并行模式</center>
+<center>Fig 7. 朴素流水线并行模式</center>
 
 例如，对于四层网络 `output=L4(L3(L2(L1(input))))`，在两张 GPU 上，可以划分为：
 * GPU_0 computes: `intermediate=L2(L1(input))`
@@ -267,10 +267,10 @@ PP 是一种典型的层间并行。它将模型按照网络层划分为多个 S
 5. GPU_1 将中间梯度发送给 GPU0。
 6. GPU_0 根据收到的梯度继续完成 L2、L1 的反向传播。
 
-整个过程如下图所示。朴素流水线仅涉及相邻 Stage 之间的点对点通信。Forward 时传输 Activation，Backward 时传输 Gradient，整个过程无需进行 All-Reduce 等集体通信。
+整个过程如 *Fig 8* 所示。朴素流水线仅涉及相邻 Stage 之间的点对点通信。Forward 时传输 Activation，Backward 时传输 Gradient，整个过程无需进行 All-Reduce 等集体通信。
 
 ![Desktop View](assets/img/blog/paral_schemes/pp_naive_process.png){: width="700" }
-<center>朴素流水线并行示例</center>
+<center>Fig 8. 朴素流水线并行示例</center>
 
 朴素流水线存在以下 3 个局限，几乎不会在实际训练中直接使用。
 1. **GPU 利用率极低：**当流水线划分的 Stage 数量为 $K$ 时，其 Bubble 比例约为 $\frac{K-1}{K}$，随着 GPU 数量增加，Bubble 所占比例也不断增大。当 $K \rightarrow \infty$ 时，Bubble 比例趋近于 1，大部分 GPU 都处于空闲状态，导致硬件利用率极低。
@@ -279,75 +279,274 @@ PP 是一种典型的层间并行。它将模型按照网络层划分为多个 S
 
 #### 2.1.2 GPipe
 
-GPipe 为 Micro-Batch 版本的 F-then-B 并行策略，流程如下图所示。GPipe 引入 Micro-Batch 思想，将一个 Mini-Batch 划分为多个更小的 Micro-Batch，显著降低了 Pipeline Bubble。
+GPipe 为 Micro-Batch 版本的 F-then-B 并行策略，流程如 *Fig 9* 所示。GPipe 引入 Micro-Batch 思想，将一个 Mini-Batch 划分为多个更小的 Micro-Batch，显著降低了 Pipeline Bubble。
 
 > PS — Mini-Batch 即为广义上的 Batch，表示一次参数更新 `optimizer.step()` 所使用的全部训练样本。
 
 ![Desktop View](assets/img/blog/paral_schemes/pp_gpip.png){: width="700" }
-<center>GPip 流水线示意图</center>
+<center>Fig 9. GPip 流水线示意图</center>
 
 若有 K 张 GPU，划分成 M 个 Micro-Batch，则 $Bubble\ ratio = \frac{K-1}{K+M-1}$。当 $M >> K$ 时，bubble 时间可以忽略不计。
 但是，当 M 足够大时，activation 的占比会急速上升，成为一个新瓶颈。
 
 GPip 通过重计算（Re-materialization）来降低显存消耗。
 在模型训练过程中的前向传播时，会记录每一个算子的计算结果，用于反向传播时的梯度计算。
-而 Re-materialization 可以不用保存中间层输出的激活值，在计算梯度的时候会重新计算出来这些激活值从而可以计算梯度，具体如下图所示。
+而 Re-materialization 可以不用保存中间层输出的激活值，在计算梯度的时候会重新计算出来这些激活值从而可以计算梯度，具体如 *Fig 10* 所示。
 
 ![Desktop View](assets/img/blog/paral_schemes/pp_gpip_activation.png){: width="700" }
-<center>GPip 重计算示意图</center>
+<center>Fig 10. GPip 重计算示意图</center>
 
 #### 2.1.3 PipeDream - 非交错式 1F1B
 
-PipeDream 通过 1F1B 策略解决了 GPipe 中激活过大的问题，具体如下图所示，$Bubble\ ratio = \frac{K-1}{K+M-1}$。
+PipeDream 通过 1F1B 策略解决了 GPipe 中激活过大的问题，具体如 *Fig 11* 所示，$Bubble\ ratio = \frac{K-1}{K+M-1}$。
 
-![Desktop View](assets/img/blog/paral_schemes/pp_pipe_dream.jpg){: width="700" }
-<center>PipeDream 流水示意图</center>
+![Desktop View](assets/img/blog/paral_schemes/pp_pipe_dream.jpg){: width="650" }
+<center>Fig 11. PipeDream 流水示意图</center>
 
 ### 2.2 张量并行
 
-张量并行是一种典型的层内并行，将计算图中的层内的参数（张量）切分到不同设备，每个设备只拥有模型的一部分，以减少内存负荷，具体如下图所示。
+张量并行是一种典型的层内并行，将计算图中的层内的参数（张量）切分到不同设备，每个设备只拥有模型的一部分，以减少内存负荷，具体如 *Fig 12* 所示。
 
 ![Desktop View](assets/img/blog/paral_schemes/tp_intro.png){: width="250" }
-<center>张量并行示意图</center>
+<center>Fig 12. 张量并行示意图</center>
 
 张量并行从数学原理上来看，就是对 Linear 层的矩阵进行分块计算，然后把结果合并，而对非 Linear 层不做额外设计。
 
 #### 2.2.1 张量并行方式
 
-Matmul 算子的计算公式为：$C = AB$ 。行并行（Row Parallelism）就是将 B 矩阵按行切成多部分，列并行则将 B 矩阵按列切成多部分，如下图所示。
+Matmul 算子的计算公式为：$C = AB$ 。行并行（Row Parallelism）就是将 B 矩阵按行切成多部分，列并行则将 B 矩阵按列切成多部分，如 *Fig 13* 所示。
 
-![Desktop View](assets/img/blog/paral_schemes/tp_1d_method.png){: width="600" }
-<center>两种张量切分方式：行并行与列并行</center>
+![Desktop View](assets/img/blog/paral_schemes/tp_1d_method.png){: width="750" }
+<center>Fig 13. 两种张量切分方式：行并行与列并行</center>
 
-#### 2.2.2 1D 张量并行
+#### 2.2.2 一维张量并行
 
-#### 2.2.3 2D 张量并行
+目前，大模型训练最广泛采用的张量并行方案由 Megatron-LM <a href="#ref-6">[6]</a> 提出。
+它采用用一维（1D）张量并行，即仅沿张量的某一个维度进行切分，并将不同分片分配到不同 GPU 上执行计算。
 
-#### 2.2.4 2.5D 张量并行
+对于 Dense LLMs 而言，主要由一个 N 层 Transformer 块组成，除此之外还有输入和输出 Embedding 层，如 *Fig 14* 所示。
 
-#### 2.2.5 3D 张量并行
+![Desktop View](assets/img/blog/paral_schemes/model_overview.png){: width="200" }
+<center>Fig 14. Transformer 模型结构</center>
 
+而 Transformer Block 主要由 MLP 和 Self-Attention 组成，因此，1D 张量并行主要针对这两部分进行切分。
+
+**（1）MLP张量并行**
+
+Transformer Block 内的 MLP 一般由 GEMM 和 GeLU 两部分组成如下式所示：
+
+$$
+output = GeLU(XA)B
+$$
+
+其中，$X$ 是输入矩阵，A 和 B 是权重矩阵。
+
+如 *Fig 15(a)* 所示，在 1D 张量并行中，对于 MLP 块一般按**照先列并行，再行并行的方式进行拆分**。
+
+在 $GeLU(XA)$ 中，如果矩阵 A 按 Row 并行，则 $Y = GeLU(X_1A_1 + X_2A_2)$，而由于 GeLU 是非线性的，所以在计算 GeLU 算子前需要同步一次。
+而 A 按照 Column 并行，**则能节省一次同步**，即：$Y = \[GeLU(X_1A_1), GeLU(X_2A_2)\]$。
+
+![Desktop View](assets/img/blog/paral_schemes/tp_1d.jpg){: width="350" }
+<center>Fig 15. Transformer Block 内的模型并行方式</center>
+
+**（2）Self-attnetion 张量并行**
+
+利用 MHA 多头注意力天然具有的并行性，对 Q、K 和 V 对应的 GEMM 采用 Column 并行，使 Attention Head 的矩阵计算都能够在单个 GPU 上独立完成。
+这种划分方式将不同 Attention Head 的参数和计算任务分配到不同 GPU，因此完成 Self-Attention 本身无需进行任何通信。
+随后，Self-Attention 输出后的线性层采用 Row 并行进行划分，无需在进入该线性层之前进行通信。
+
+在 Megatron-LM 1D 并行方案中，对于 MLP 和 Self-Attention 都采用了这种 "Column + Row" 的 GEMM 并行方式。这样可以将两个连续的矩阵乘法融合在一起，消除中间的一次同步。
+
+
+![Desktop View](assets/img/blog/paral_schemes/tp_transformer_communication.jpg){: width="425" }
+<center>Fig 16. Transformer Block 中 TP 并行通信开销</center>
+
+
+#### 2.2.3 多维张量并行
+
+虽然 Megatron-LM 的 1D 张量并行已经成为当前大模型训练的主流方案，但随着 GPU 数量不断增加，其通信复杂度也随之提升。此外，由于 1D 张量并行中输入 Activation 在多个 GPU 上保持完整副本，因此 Activation Memory 无法继续下降。
+
+为了解决这一问题，研究者提出了 2D、2.5D 以及 3D 张量并行，通过同时切分权重矩阵和输入 Activation，降低显存占用的同时减少通信开销，Colossal-AI <a href="#ref-7">[7]</a>训练框架已经集成了这些并行方式。
+
+**（1）2D 张量并行**
+
+2D TP 最早由 **SUMMA（Scalable Universal Matrix Multiplication Algorithm）**<a href="#ref-8">[8]</a> 引入，其核心思想是将参与矩阵乘法的两个矩阵同时按照二维 Block 进行划分，并将 GPU 组织成一个二维 Processor Grid。
+
+设矩阵乘法为：
+
+$$
+C = AB,
+$$
+
+其中
+
+$$
+A \in \mathbb{R}^{M\times K},\qquad
+B \in \mathbb{R}^{K\times N}.
+$$
+
+对于一个 $2\times2$ Processor Grid，可将矩阵划分为：
+
+$$
+A=
+\begin{bmatrix}
+A_{11} & A_{12}\\
+A_{21} & A_{22}
+\end{bmatrix},
+\qquad
+B=
+\begin{bmatrix}
+B_{11} & B_{12}\\
+B_{21} & B_{22}
+\end{bmatrix}.
+$$
+
+> PS — 每个设备仅存储一部分，比如 GPU 0 仅存 A_{11}，每次计算都需要冗余通信
+
+最终输出矩阵各 Block 的计算公式为
+
+$$
+\begin{aligned}
+C_{11}&=A_{11}B_{11}+A_{12}B_{21},\\
+C_{12}&=A_{11}B_{12}+A_{12}B_{22},\\
+C_{21}&=A_{21}B_{11}+A_{22}B_{21},\\
+C_{22}&=A_{21}B_{12}+A_{22}B_{22}.
+\end{aligned}
+$$
+
+与 1D 张量并行不同，2D 张量并行不仅切分权重，同时也切分输入 Activation。
+
+例如，对于一个$(B,S,8192)\rightarrow(B,S,32768)$ 的 Linear 层，在 **TP=4** 时：
+
+- **1D Tensor Parallel：**
+  - 每张 GPU 保存完整输入 Activation：$(B,S,8192)$；
+  - 权重仅保存 $1/4$。
+
+- **2D Tensor Parallel：**
+  - GPU 组成 $2\times2$ 网格；
+  - 输入 Activation 被切分为 $(B,S,4096)$；
+  - 权重同时沿行、列两个维度切分；
+  - 每张 GPU 仅保存部分 Activation 与部分权重。
+
+因此，相比 1D 张量并行，2D 张量并行进一步降低了 Activation Memory，同时通信复杂度由
+$O(P)$ 降低为 $O(\sqrt{P})$。
+
+**（2）2.5D 张量并行**
+
+2D 张量并行虽然降低了通信复杂度，但每轮矩阵乘法仍需要在二维 Processor Grid 内进行 **Row Broadcast** 和 **Column Broadcast**，随着 GPU 数量增加，这部分通信仍然占据较大的比例。
+
+2.5D TP 进一步在第三个维度引入**冗余副本（Replication）**，相当于用一次预取，替代了多次重复通信。
+
+假设有$P=q^2d$ 张 GPU，其中：
+
+- $q\times q$ 为二维 Processor Grid；
+- $d$ 为复制维度（Replication Factor）。
+
+与 2D 张量并行不同，每个矩阵 Block 会复制到 $d$ 个 GPU 上：
+
+$$
+A_{ij}
+\longrightarrow
+\left\{
+A_{ij}^{(1)},
+A_{ij}^{(2)},
+\cdots,
+A_{ij}^{(d)}
+\right\}.
+$$
+
+于是，每个副本组分别负责一部分乘法计算：
+
+$$
+C^{(t)}
+=
+A^{(t)}B^{(t)},
+\qquad
+t=1,\cdots,d.
+$$
+
+最终，仅需对所有副本执行一次 Reduce：
+
+$$
+C
+=
+\sum_{t=1}^{d}
+C^{(t)}.
+$$
+
+由于矩阵已经在第三维进行了复制，同一个副本组中的 GPU 可以直接访问本地矩阵，而无需像 2D 张量并行那样在每一轮迭代都广播矩阵 Block。因此，通信模式由
+
+$$
+\underbrace{\text{Broadcast}+\text{Broadcast}}_{\text{每轮}}
+$$
+
+变为
+
+$$
+\underbrace{\text{Local GEMM}}_{\text{重复计算}}
++
+\underbrace{\text{Reduce}}_{\text{最终一次}}.
+$$
+
+也就是说，2.5D 张量并行**使用少量额外显存换取通信减少**：矩阵复制带来了更多本地计算，但显著降低了跨 GPU 的 Broadcast 开销。
+
+**（3）3D 张量并行**
+
+3D TP 进一步将矩阵划分到三个维度，并将 GPU 组织成立方体 Processor Grid，Transformer Block 中的3D TP 如 *Fig 17* 所示。
+
+![Desktop View](assets/img/blog/paral_schemes/tp_3d.jpg){: width="625" }
+<center>Fig 17. Colossal-AI 框架中的 3D 张量并行方案</center>
+
+假设共有$P=q^3$ 张 GPU，则每个 GPU 仅负责$\frac1q$的输入、$\frac1q$的权重以及$\frac1q$的输出。
+
+例如，对于 **64 张 GPU**，
+
+3D Tensor Parallel 可以组织为
+
+$$
+4\times4\times4
+$$
+
+的 Processor Grid。
+
+相比 2D 张量并行：
+
+- 输入 Activation 进一步切分；
+- 权重进一步切分；
+- 通信复杂度进一步下降为
+
+$$
+O(\sqrt[3]{P}).
+$$
+
+理论上，3D 张量并行具有最佳的扩展能力，但由于实现复杂，需要维护多个通信组，并且需要更加复杂的 Broadcast、Reduce 与同步机制，因此目前主要用于学术研究，在工业界应用较少。
 
 ## 3. MoE 并行
 
-## 4. 上下文并行
+模型规模的扩展会导致训练成本显著增加，计算资源的限制成为了大规模密集模型训练的瓶颈。
+为了解决这一问题，一种基于稀疏 MoE 层<a href="#ref-9">[9]</a>的深度学习模型架构被提出，即将大模型拆分成多个小模型（即 Expert），每轮迭代根据样本决定激活一部分专家用于计算，达到了节省计算资源的效果。
 
-## 5. 混合并行
+![Desktop View](assets/img/blog/paral_schemes/moe.jpg){: width="500" }
+<center>Fig 18. MoE 网络结构</center>
+
+，模型包含 3 个模型层，如(a)到(b)所示，将中间层扩展为具有 n 个 expert 的 MoE 结构，并引入 Gating network 和 Top_k 机制，MoE 细节如下图(c)所示
 
 
 ## Reference
 <span id="ref-1"></span>[1] Zhao Y, Gu A, Varma R, et al. Pytorch FSDP: Experiences on scaling fully sharded data parallel. arXiv preprint arXiv:2304.11277, 2023.
 
-<span id="ref-2"></span>[2]  Rasley J, Rajbhandari S, Ruwase O, et al. DeepSpeed: System optimizations enable training deep learning models with over 100 billion parameters[C]//Proceedings of the 26th ACM SIGKDD international conference on knowledge discovery & data mining. 2020: 3505-3506.
+<span id="ref-2"></span>[2] Rasley J, Rajbhandari S, Ruwase O, et al. DeepSpeed: System optimizations enable training deep learning models with over 100 billion parameters[C]//Proceedings of the 26th ACM SIGKDD international conference on knowledge discovery & data mining. 2020: 3505-3506.
 
 <span id="ref-3"></span>[3] https://github.com/liguodongiot/llm-action.
 
 <span id="ref-4"></span>[4] Huang Y, Cheng Y, Bapna A, et al. Gpipe: Efficient training of giant neural networks using pipeline parallelism[C]. Advances in neural information processing systems, 2019, 32.
 
-<span id="ref-5"></span>[5]  Narayanan D, Harlap A, Phanishayee A, et al. PipeDream: Generalized pipeline parallelism for DNN training[C]//Proceedings of the 27th ACM symposium on operating systems principles. 2019: 1-15.
+<span id="ref-5"></span>[5] Narayanan D, Harlap A, Phanishayee A, et al. PipeDream: Generalized pipeline parallelism for DNN training[C]//Proceedings of the 27th ACM symposium on operating systems principles. 2019: 1-15.
 
 <span id="ref-6"></span>[6] Shoeybi M, Patwary M, Puri R, et al. Megatron-LM: Training multi-billion parameter language models using model parallelism. arXiv preprint arXiv:1909.08053, 2019.
 
 <span id="ref-7"></span>[7] Li S, Liu H, Bian Z, et al. Colossal-AI: A unified deep learning system for large-scale parallel training[C]//Proceedings of the 52nd International Conference on Parallel Processing. 2023: 766-775.
 
-<span id="ref-8"></span>[8] Shazeer N, Mirhoseini A, Maziarz K, et al. Outrageously large neural networks: The sparsely-gated mixture-of-experts layer. arXiv preprint arXiv:1701.06538, 2017.
+<span id="ref-8"></span>[8] Van De Geijn R A, Watts J. SUMMA: Scalable universal matrix multiplication algorithm[J]. Concurrency: Practice and Experience, 1997, 9(4): 255-274.
+
+<span id="ref-9"></span>[9] Shazeer N, Mirhoseini A, Maziarz K, et al. Outrageously large neural networks: The sparsely-gated mixture-of-experts layer. arXiv preprint arXiv:1701.06538, 2017.
