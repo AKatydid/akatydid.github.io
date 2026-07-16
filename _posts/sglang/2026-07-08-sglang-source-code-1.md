@@ -28,7 +28,7 @@ SGLang 是目前最常用的工业级推理引擎之一。
 然而，由于 KV Cache 作为全局资源，遍布推理全流程。为便于阅读，本章在此列出相关代码目录。
 
 * KV Cache 流程相关代码
-  * **初始化：**位于 [`class Scheduler::__init__`](https://github.com/sgl-project/sglang/blob/v0.5.13/python/sglang/srt/managers/scheduler.py#L433-L452) 中。其中，Scheduler 类并不是在主进程中直接创建，而是在 `Engine._launch_subprocesses(...)` 启动子进程时，调用函数 `_launch_scheduler_processes(...)` ，通过 [`mp.Process`](https://github.com/sgl-project/sglang/blob/v0.5.13/python/sglang/srt/entrypoints/engine.py#L614-L646) 创建 Scheduler 进程；子进程启动后，会执行 srt/managers/scheduler.py 中的函数 [`run_scheduler_process(...)`](https://github.com/sgl-project/sglang/blob/v0.5.13/python/sglang/srt/managers/scheduler.py#L4046-L4056)，在其中实例化 Scheduler，并完成 KV Cache、Memory Pool 等核心组件的初始化。
+  * **初始化：**位于 [`class Scheduler::__init__`](https://github.com/sgl-project/sglang/blob/v0.5.13/python/sglang/srt/managers/scheduler.py#L433-L452) 中。其中，Scheduler 类并不是在主进程中直接创建，而是在 `Engine._launch_subprocesses(...)` 启动子进程时，调用函数 `_launch_scheduler_processes(...)` ，通过 [`mp.Process`](https://github.com/sgl-project/sglang/blob/v0.5.13/python/sglang/srt/entrypoints/engine.py#L614-L646) 创建 Scheduler 进程；子进程启动后，**会执行 srt/managers/scheduler.py 中的函数 [`run_scheduler_process(...)`](https://github.com/sgl-project/sglang/blob/v0.5.13/python/sglang/srt/managers/scheduler.py#L4046-L4056)，在其中实例化 Scheduler，并完成 KV Cache、Memory Pool 等核心组件的初始化。**
   * **Batch 构建：**每轮调度时，`Scheduler.event_loop()` 会调用 [`get_next_batch_to_run()`](https://github.com/sgl-project/sglang/blob/v0.5.13/python/sglang/srt/managers/scheduler.py#L2415-L2540) 选择当前需要执行的请求，并构建一个 ScheduleBatch。在这一过程中，会完成与 KV Cache 相关的核心工作，例如 Prefix Cache 命中检查、KV Block 分配与复用、请求状态更新 等。随后，ScheduleBatch 会进一步转换为 ModelWorkerBatch（位于 tp_worker），补充模型执行所需的元数据，最后封装为 ForwardBatch 并发送给 ModelRunner 执行一次 Forward。
   ```
     The following is the flow of data structures for a batch:
@@ -45,7 +45,29 @@ SGLang 是目前最常用的工业级推理引擎之一。
 
 * Cache 类相关代码
 
+## 2.相关模块关键定义
 
+### 2.1 KV Cache 基础类
+
+#### 2.1.1 ReqToTokenPool
+
+#### 2.1.2 MHATokenToKVPool（BaseTokenToKVPool）
+
+#### 2.1.3 ChunkCache
+
+#### 2.1.4 RadixCache
+
+### 2.2 基础调度类 
+
+#### 2.2.1 SchedulePolicy
+
+#### 2.2.2 PrefillAdder
+
+#### 2.2.3 Req
+
+#### 2.2.4 ModelConfig & ForwardMode
+
+#### 2.2.5 ScheduleBatch
 
 
 ## 总结
