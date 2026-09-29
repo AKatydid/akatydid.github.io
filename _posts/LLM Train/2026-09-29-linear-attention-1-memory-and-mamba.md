@@ -1,6 +1,6 @@
 ---
 layout: post
-title: 'Linear Attention（一）：有限状态记忆、线性复杂度与 Mamba'
+title: 'Linear Attention (1)：有限状态记忆、线性复杂度与 Mamba'
 date: 2026-09-29 09:00 +0000
 categories: [LLM]
 tags: [LLM, Linear Attention, Mamba, SSM]
@@ -8,7 +8,7 @@ pin: false
 math: true
 ---
 
-> **系列导读**：本文从“有限状态如何记忆一段历史”出发，讲清 Linear Attention 的基本递推、它为什么省内存，以及 Mamba 到底算不算 Linear Attention。第二篇进入 DeltaNet、Gated DeltaNet（GDN）和 Qwen3-Next；第三篇拆解 Kimi Delta Attention（KDA）与 SGLang 的 chunk kernel。
+> **系列导读**：本文介绍 Linear Attention 的基本递推，以及 Mamba 与它的关系。第二篇讲 DeltaNet、Gated DeltaNet（GDN）和 Qwen3-Next；第三篇讲 Kimi Delta Attention（KDA）；第四篇分析 SGLang CUDA 路径，并以 Qwen3-Next 做 roofline 估算。
 
 ## 核心结论
 
@@ -110,7 +110,7 @@ def linear_attention_recurrent(q, k, v):
 ![Mamba 论文中的 H3、Gated MLP 与 Mamba block 对比](/assets/img/blog/Linear%20Attnetion/mamba-paper-figure-3.jpg){: width="800" }
 <center>图 3. Mamba block 架构。<a href="#ref-4">[4]</a></center>
 
-Mamba-2 的 **State Space Duality（SSD）** 进一步展示了结构化 SSM 与某些注意力形式之间的数学联系，并把核心计算整理成易于使用矩阵乘法的块算法。因此论文会说“Transformers are SSMs”或把某些 SSM 写成线性注意力形式；这指的是特定结构下的等价/对偶，不代表 Mamba-1 就是经典线性注意力。
+Mamba-2 的 **State Space Duality（SSD）** 进一步展示了结构化 SSM 与某些注意力形式之间的数学联系，并把核心计算整理成易于使用矩阵乘法的块算法 [<a href="#ref-6">6</a>]。因此论文会说“Transformers are SSMs”或把某些 SSM 写成线性注意力形式；这指的是特定结构下的等价/对偶，不代表 Mamba-1 就是经典线性注意力。
 
 可以用这张表快速定位术语：
 
@@ -146,10 +146,6 @@ o_t\propto S_t^\top\phi(q_t).
 $$
 
 生成时维护的状态大小不随历史增长，训练时可以按块并行计算。不过摘要有损：相似或冲突的信息可能混在一起，主题变化时旧内容也不会自动清除。后续方法尝试改正冲突记忆、清理过时信息；需要精确回查远处内容时，混合模型仍保留全局 attention。
-2. **怎么清理过时记忆？** Forget gate 对状态衰减。
-3. **能否只忘某些特征方向？** KDA 把标量遗忘推广到 key 通道级。
-
-这三问分别把我们带到 DeltaNet、Gated DeltaNet 和 KDA。
 
 ## References
 
@@ -163,6 +159,6 @@ $$
 
 <a id="ref-5"></a>[5] Songlin Yang et al. *Gated Linear Attention Transformers with Hardware-Efficient Training*. ICML 2024. [arXiv:2312.06635](https://arxiv.org/abs/2312.06635)
 
-<a id="ref-6"></a>[6] Tri Dao, Albert Gu. *Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality*. ICML 2024. [arXiv:2405.21060](https://arxiv.org/abs/2405.21060)
+<a id="ref-6"></a>[6] Tri Dao, Albert Gu. *Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality*. In *Proceedings of the 41st International Conference on Machine Learning*, PMLR 235:10041–10071, 2024. [会议论文](https://proceedings.mlr.press/v235/dao24a.html)
 
 <a id="ref-7"></a>[7] Songlin Yang et al. *Parallelizing Linear Transformers with the Delta Rule over Sequence Length*. NeurIPS 2024. [arXiv:2406.06484](https://arxiv.org/abs/2406.06484)
