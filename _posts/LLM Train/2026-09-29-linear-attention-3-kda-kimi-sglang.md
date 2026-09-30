@@ -3,7 +3,7 @@ layout: post
 title: 'Linear Attention（三）：Kimi Delta Attention、逐通道记忆与 SGLang'
 date: 2026-09-29 09:10 +0000
 categories: [LLM]
-tags: [LLM, Linear Attention, KDA, Kimi, SGLang]
+tags: [LLM, Linear Attention, Kimi, SGLang]
 pin: false
 math: true
 ---
